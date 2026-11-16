@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written (#251), never trimmed from a live answer: the answer of
+     Smartschool's user picker (/?module=Userselect&file=dispatcher) to
+     userSelect / get Items Selected with usc mygroups_900501, right after a
+     GET of the members page of own group 900501 (members.html), in the shape
+     seen live on 2026-11-16. Made-up people of test/fixtures/lvs/FAKES.md and
+     made-up IDs; not in the order of the members page. -->
+<server><response><status>ok</status><actions><action>
+<subsystem>userselect</subsystem><command>handle selected items</command>
+<data><items>
+<item><type>U</type><id>900001</id><ssId>4069</ssId><parentId>0</parentId><name>Janssens Jan</name><icon>user</icon><sortField>janssens jan</sortField><selectable>1</selectable><forbidden>0</forbidden><tooltip>Niet geselecteerd</tooltip><schoolname>Springfield Academy</schoolname></item>
+<item><type>U</type><id>900002</id><ssId>4069</ssId><parentId>0</parentId><name>Peeters Marie</name><icon>user</icon><sortField>peeters marie</sortField><selectable>1</selectable><forbidden>0</forbidden><tooltip>Niet geselecteerd</tooltip><schoolname>Springfield Academy</schoolname></item>
+<item><type>U</type><id>900003</id><ssId>4069</ssId><parentId>0</parentId><name>Dupont Chloé</name><icon>user</icon><sortField>dupont chloe</sortField><selectable>1</selectable><forbidden>0</forbidden><tooltip>Niet geselecteerd</tooltip><schoolname></schoolname></item>
+</items></data>
+</action></actions></response></server>

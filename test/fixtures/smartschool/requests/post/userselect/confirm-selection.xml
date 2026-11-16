@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written (#253), never trimmed from a live answer: the answer of
+     Smartschool's user picker (/?module=Userselect&file=dispatcher) to
+     userSelect / confirm Selection with usc mygroups_{id} and a new
+     selection, in the shape seen live on 2026-11-16: close the picker, and
+     submit the form "form" of the page that opened it (the members page).
+     It saves nothing itself. -->
+<server><response><status>ok</status><actions><action>
+<subsystem>userselect</subsystem><command>closeUsc</command>
+<data><close><type>1</type><formname>form</formname></close></data>
+</action></actions></response></server>

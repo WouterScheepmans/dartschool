@@ -115,6 +115,35 @@
 //   of goals (`goal/selector/api/v1/leerplannen/{location}/{date}` with
 //   `"isView": true`, GoalService.resolve, #222), which only reads: never a
 //   curriculum marked as a favourite or the selector's settings saved;
+// - any POST to Smartschool's user picker (`/?module=Userselect&file=
+//   dispatcher`) but the read of the selection of an own group's members
+//   (`userSelect` / `get Items Selected`, with only a `usc` of
+//   `mygroups_{id}`, MyGroupsService.members, #251), and, for the opt-in
+//   live test of #253, the new selection of the members of the run's own
+//   group (`confirm Selection`, with only its `usc` and an `xml` of no
+//   item or one: the own account, type `U`, with its platform). Never a
+//   `confirm Selection` of another group, nor one that names anyone but the
+//   own account; and of the member writes of #253 besides, only those of
+//   the run's own group: the post of its members form
+//   (`function=users&mID={id}`, `_csrf_token`, `store` `1` and an empty
+//   `mID` only), which saves the selection, and the removal of the own
+//   account from it (`/Profile/Mygroups/deleteUser`, `userID` and
+//   `groupID` only), while the last list of own groups has the group (see
+//   below). So the run's group never has another member than the own
+//   account. And any request
+//   to "Mijn groepen" (`/?module=Profile&file=mygroups`) but the list of
+//   own groups, a group's members page (`function=users`), and, for the
+//   opt-in live test of #252, the writes of MyGroupsService on the run's
+//   own group: the form for a new group (`function=addedit`) and its save
+//   (a POST of `_csrf_token`, `store` `1`, `name` and `desc` only), named
+//   after the run ("dartschool test <run tag>"), while the run may still
+//   create one (maxMyGroupCreates); and, of a group the run made (one that
+//   a list of own groups Smartschool answered names after the run, once a
+//   create went out) and that the last list Smartschool answered still
+//   has, its edit form (`function=addedit&mID={id}`), its save (as the
+//   create, a name after the run) and its delete (`function=delete&mID=
+//   {id}`, a GET that deletes the group). Never a write of another own
+//   group, and no delete of a group that the last list no longer has;
 // - any Intradesk POST but the writes of IntradeskService that the live
 //   suite tries (#128), and those only in the Intradesk folder it may write
 //   in: "tests" in "2. SMA" at the root, as Smartschool's listings name it
@@ -225,6 +254,10 @@ const liveIntradeskFolder = ('2. SMA', 'tests');
 /// before the run's tag: the same as the subject of its messages.
 const liveLessonContentPrefix = liveSubjectPrefix;
 
+/// The start of the name of the own mail group the live suite makes (#252),
+/// before the run's tag.
+const liveMyGroupPrefix = 'dartschool test';
+
 /// A request that [LiveWireGuard] did not let out, or an answer it did not
 /// let through.
 class LiveGuardViolation implements Exception {
@@ -264,6 +297,8 @@ class LiveWireGuard extends Interceptor {
     // The planned cluster of planner_lesson_cluster_live_test.dart (#230).
     this.maxPlannedLessonClusters = 1,
     this.minPlanAheadDays = 28,
+    // The own mail group of my_groups_write_live_test.dart (#252).
+    this.maxMyGroupCreates = 1,
     void Function(LiveGuardViolation violation)? onViolation,
   }) : _onViolation = onViolation ?? _failTest;
 
@@ -299,6 +334,9 @@ class LiveWireGuard extends Interceptor {
   /// (#230): pupils see the moments of a planned cluster, so the run plans
   /// in a week far ahead.
   final int minPlanAheadDays;
+
+  /// How many own mail groups the run may make at most (#252).
+  final int maxMyGroupCreates;
 
   final void Function(LiveGuardViolation violation) _onViolation;
 
@@ -347,6 +385,31 @@ class LiveWireGuard extends Interceptor {
 
   /// How many plans of a lesson cluster it let out (#230).
   int plannedLessonClusters = 0;
+
+  /// How many creates of an own mail group it let out (#252).
+  int myGroupCreates = 0;
+
+  /// How many new selections of the members of the run's own group (the
+  /// member picker's `confirm Selection`) it let out (#253).
+  int myGroupSelections = 0;
+
+  /// How many posts of the members form of the run's own group, which save
+  /// the selection, it let out (#253).
+  int myGroupMemberSaves = 0;
+
+  /// How many removals of a member from the run's own group it let out
+  /// (#253).
+  int myGroupMemberRemovals = 0;
+
+  /// The own mail groups of the last list of own groups that Smartschool
+  /// answered through the guard, by ID, with their names (#252): the list,
+  /// the list after a save, and the answer to a delete.
+  final Map<int, String> _myGroupsListed = {};
+
+  /// The own mail groups the run made (#252): those that a list of own
+  /// groups names after the run, once a create went out. The run's tag is
+  /// new for every run, so no other group has such a name.
+  final Set<int> _runMyGroups = {};
 
   /// Whether a step of a login (the password, the 2FA code, the account
   /// verification answer) came through the guard in this run (#134). The
@@ -670,6 +733,12 @@ class LiveWireGuard extends Interceptor {
         uri.queryParameters['file'] == 'searchUsers') {
       return _otherSchoolsSwitchRefusal(uri);
     }
+    if (method == 'GET' &&
+        uri.path == '/' &&
+        uri.queryParameters['module'] == 'Profile' &&
+        uri.queryParameters['file'] == 'mygroups') {
+      return _myGroupsGetRefusal(uri);
+    }
     if (method == 'GET') return null;
     if (method == 'DELETE' && uri.path.startsWith(_lessonContentApi)) {
       return _lessonContentDeleteRefusal(uri.path);
@@ -708,6 +777,26 @@ class LiveWireGuard extends Interceptor {
     }
 
     final query = uri.queryParameters;
+    if (path == '/' &&
+        query['module'] == 'Userselect' &&
+        query['file'] == 'dispatcher') {
+      return _userselectRefusal(uri, options.data);
+    }
+    if (path == '/' &&
+        query['module'] == 'Profile' &&
+        query['file'] == 'mygroups' &&
+        query['function'] == 'addedit') {
+      return _myGroupSaveRefusal(uri, options.data);
+    }
+    if (path == '/' &&
+        query['module'] == 'Profile' &&
+        query['file'] == 'mygroups' &&
+        query['function'] == 'users') {
+      return _myGroupMembersSaveRefusal(uri, options.data);
+    }
+    if (path == _myGroupRemovePath) {
+      return _myGroupRemoveRefusal(uri, options.data);
+    }
     if (path == '/' && query['module'] == 'Messages') {
       switch ((query['file'], query['function'])) {
         case ('dispatcher', _):
@@ -895,12 +984,25 @@ class LiveWireGuard extends Interceptor {
   /// `<action>` and `<params>`, nothing else), whose params are its own,
   /// each once.
   static bool _isLvsReadCommand(Object? command) {
-    if (command is! String) return false;
+    final one = _singleCommand(command);
+    if (one == null) return false;
+    final allowed = _lvsCommands[(one.subsystem, one.action)];
+    return allowed != null && one.params.keys.every(allowed.contains);
+  }
+
+  /// [command], the form field `command` of an XML dispatcher, when it is a
+  /// `<request>` of one `<command>` (its `<subsystem>`, `<action>` and
+  /// `<params>`, nothing else) whose params each have a name, once, and
+  /// text only: its subsystem, action and params by name. `null` for
+  /// anything else.
+  static ({String subsystem, String action, Map<String, String> params})?
+  _singleCommand(Object? command) {
+    if (command is! String) return null;
     final XmlDocument xml;
     try {
       xml = XmlDocument.parse(command);
     } on XmlException {
-      return false;
+      return null;
     }
     bool onlyElements(XmlElement element) => element.children.every(
       (node) =>
@@ -908,7 +1010,7 @@ class LiveWireGuard extends Interceptor {
     );
     final roots = xml.childElements.toList();
     if (roots.length != 1 || roots.single.name.qualified != 'request') {
-      return false;
+      return null;
     }
     final request = roots.single;
     final commands = request.childElements.toList();
@@ -916,30 +1018,338 @@ class LiveWireGuard extends Interceptor {
         commands.length != 1 ||
         commands.single.name.qualified != 'command' ||
         !onlyElements(commands.single)) {
-      return false;
+      return null;
     }
     final parts = commands.single.childElements.toList();
     if (parts.map((part) => part.name.qualified).join(',') !=
             'subsystem,action,params' ||
         !onlyElements(parts[2])) {
-      return false;
+      return null;
     }
-    final allowed =
-        _lvsCommands[(parts[0].innerText.trim(), parts[1].innerText.trim())];
-    if (allowed == null) return false;
-    final names = <String>{};
+    final params = <String, String>{};
     for (final param in parts[2].childElements) {
       final name = param.getAttribute('name');
       if (param.name.qualified != 'param' ||
           name == null ||
           param.attributes.length != 1 ||
           param.childElements.isNotEmpty ||
-          !allowed.contains(name) ||
-          !names.add(name)) {
-        return false;
+          params.containsKey(name)) {
+        return null;
+      }
+      params[name] = param.innerText;
+    }
+    return (
+      subsystem: parts[0].innerText.trim(),
+      action: parts[1].innerText.trim(),
+      params: params,
+    );
+  }
+
+  /// The `usc` of the member picker for the members of an own group
+  /// (`mygroups_{id}`, #251).
+  static final _myGroupUsc = RegExp(r'^mygroups_\d+$');
+
+  /// Why the POST to the dispatcher of Smartschool's user picker
+  /// (`/?module=Userselect&file=dispatcher`) with [data] may not go out, or
+  /// `null`: the read of the selection of an own group's members
+  /// (`userSelect` / `get Items Selected`, with only a `usc` of
+  /// `mygroups_{id}`, MyGroupsService.members, #251), which the form holds
+  /// alone; and the new selection of the members of the run's own group
+  /// (`confirm Selection`, with only its `usc` and an `xml` of the own
+  /// account or no one, #253), while the last list has the group. Never
+  /// another `confirm Selection`, which replaces a group's members, nor a
+  /// search or another picker's selection.
+  String? _userselectRefusal(Uri uri, Object? data) {
+    final form = data is Map ? data : const {};
+    final one = uri.queryParameters.length == 2 && form.length == 1
+        ? _singleCommand(form['command'])
+        : null;
+    if (one != null &&
+        one.subsystem == 'userSelect' &&
+        one.action == 'get Items Selected' &&
+        one.params.length == 1 &&
+        _myGroupUsc.hasMatch(one.params['usc'] ?? '')) {
+      return null;
+    }
+    const nothingElse =
+        "the live suite changes no own group's members but those of the "
+        'group the run makes: it sends the user picker no command but the '
+        'read of the selection of an own group (userSelect / get Items '
+        'Selected, with only a usc of mygroups_{id}, #251), and the new '
+        "selection of the members of the run's own group (confirm "
+        'Selection, with only its usc and xml, #253)';
+    if (one == null ||
+        one.subsystem != 'userSelect' ||
+        one.action != 'confirm Selection' ||
+        one.params.length != 2 ||
+        !one.params.containsKey('xml')) {
+      return nothingElse;
+    }
+    final usc = RegExp(
+      r'^mygroups_([1-9]\d*)$',
+    ).firstMatch(one.params['usc'] ?? '');
+    final refusal = _runMyGroupRefusal(
+      usc == null ? null : int.parse(usc.group(1)!),
+      'change of its members',
+    );
+    if (refusal != null) return '$nothingElse; $refusal';
+    final selection = _ownOnlySelectionRefusal(one.params['xml']!);
+    if (selection != null) return selection;
+    myGroupSelections++;
+    return null;
+  }
+
+  /// Why [xml], the new selection of a `confirm Selection` of the run's own
+  /// group, may not go out, or `null`: an `<items>` of no `<item>` or one,
+  /// the own account (`type` `U`, its `ssId` and `id`, nothing else), so
+  /// that the group never has another member (#253).
+  String? _ownOnlySelectionRefusal(String xml) {
+    const refusal =
+        "the new selection of the members of the run's own group names no "
+        'one but the own account (an <items> of no <item> or one, type U, '
+        'with its ssId and id only, #253)';
+    final own = _own;
+    if (own == null) return '$refusal; the own account is not known yet';
+    final XmlDocument doc;
+    try {
+      doc = XmlDocument.parse(xml);
+    } on XmlException {
+      return refusal;
+    }
+    bool blank(XmlNode node) => node is XmlText && node.value.trim().isEmpty;
+    final roots = doc.childElements.toList();
+    if (roots.length != 1 ||
+        roots.single.name.qualified != 'items' ||
+        roots.single.attributes.isNotEmpty ||
+        roots.single.children.any(
+          (node) =>
+              !blank(node) &&
+              !(node is XmlElement && node.name.qualified == 'item'),
+        )) {
+      return refusal;
+    }
+    final items = roots.single.childElements.toList();
+    if (items.length > 1) return refusal;
+    for (final item in items) {
+      final fields = <String, String>{};
+      for (final node in item.children) {
+        if (blank(node)) continue;
+        if (node is! XmlElement ||
+            node.attributes.isNotEmpty ||
+            node.childElements.isNotEmpty ||
+            fields.containsKey(node.name.qualified)) {
+          return refusal;
+        }
+        fields[node.name.qualified] = node.innerText;
+      }
+      if (item.attributes.isNotEmpty ||
+          fields.length != 3 ||
+          fields['type'] != 'U' ||
+          fields['ssId'] != '${own.ssId}' ||
+          fields['id'] != '${own.userId}') {
+        return refusal;
       }
     }
-    return true;
+    return null;
+  }
+
+  /// The removal of one member from an own group (#253).
+  static const _myGroupRemovePath = '/Profile/Mygroups/deleteUser';
+
+  /// Why the post of the members form of an own mail group (a POST to
+  /// `/?module=Profile&file=mygroups&function=users&mID={id}`) with [data]
+  /// may not go out, or `null` (#253): only the fields of the form
+  /// (`_csrf_token`, `store` `1`, an empty `mID`), of the run's own group
+  /// while the last list has it. It saves the picker's selection, which
+  /// only a `confirm Selection` the guard let out or the group's members
+  /// page (its current members) set.
+  String? _myGroupMembersSaveRefusal(Uri uri, Object? data) {
+    final form = data is Map ? data : const {};
+    final fields = {for (final key in form.keys) '$key'};
+    if (fields.length != 3 ||
+        !fields.containsAll(const {'_csrf_token', 'store', 'mID'}) ||
+        '${form['store']}' != '1' ||
+        '${form['mID']}' != '' ||
+        '${form['_csrf_token']}'.isEmpty) {
+      return 'the save of the members of an own group sends the fields of '
+          'its form alone: _csrf_token, store 1 and an empty mID (#253)';
+    }
+    final refusal = _runMyGroupRefusal(
+      _myGroupOf(uri, 'users'),
+      'change of its members',
+    );
+    if (refusal != null) {
+      return "the live suite changes no own group's members but those of the "
+          'group the run makes; $refusal';
+    }
+    myGroupMemberSaves++;
+    return null;
+  }
+
+  /// Why the removal of a member from an own group (a POST to
+  /// `/Profile/Mygroups/deleteUser`) with [data] may not go out, or `null`
+  /// (#253): only `userID` and `groupID`, the own account from the run's own
+  /// group while the last list has it.
+  String? _myGroupRemoveRefusal(Uri uri, Object? data) {
+    final form = data is Map ? data : const {};
+    final fields = {for (final key in form.keys) '$key'};
+    final own = _own;
+    if (uri.hasQuery ||
+        fields.length != 2 ||
+        !fields.containsAll(const {'userID', 'groupID'}) ||
+        own == null ||
+        '${form['userID']}' != '${own.userId}') {
+      return 'the live suite removes no one from an own group but the own '
+          'account, with userID and groupID alone (#253)';
+    }
+    final groupId = '${form['groupID']}';
+    final refusal = _runMyGroupRefusal(
+      RegExp(r'^[1-9]\d*$').hasMatch(groupId) ? int.parse(groupId) : null,
+      'removal of a member',
+    );
+    if (refusal != null) {
+      return "the live suite changes no own group's members but those of the "
+          'group the run makes; $refusal';
+    }
+    myGroupMemberRemovals++;
+    return null;
+  }
+
+  /// The name of the own mail group of the run (#252): every name it saves
+  /// starts with this.
+  String get _myGroupTagged => '$liveMyGroupPrefix $runTag';
+
+  /// The ID of the own mail group of [uri]'s `mID`, when [uri] has the query
+  /// of "Mijn groepen" with [function] and that ID and nothing else; `null`
+  /// otherwise.
+  static int? _myGroupOf(Uri uri, String function) {
+    final query = uri.queryParameters;
+    if (query.length != 4 || query['function'] != function) return null;
+    final id = query['mID'] ?? '';
+    return RegExp(r'^[1-9]\d*$').hasMatch(id) ? int.parse(id) : null;
+  }
+
+  /// Why a write to own group [groupId] may not go out, or `null`: only to
+  /// a group the run made, that the last list of own groups still has
+  /// (#252).
+  String? _runMyGroupRefusal(int? groupId, String write) {
+    if (groupId == null) {
+      return 'the live suite sends "Mijn groepen" no $write but of one own '
+          'group, by its mID alone (#252)';
+    }
+    if (!_runMyGroups.contains(groupId)) {
+      return 'own group $groupId is not one the run made: the live suite '
+          'changes no other own group (#252)';
+    }
+    if (!_myGroupsListed.containsKey(groupId)) {
+      return 'own group $groupId of the run is not in the last list of own '
+          'groups Smartschool answered: deleted already, or not read again '
+          '(#252)';
+    }
+    return null;
+  }
+
+  /// Why the GET of "Mijn groepen" (`/?module=Profile&file=mygroups`) to
+  /// [uri] may not go out, or `null`: the list of own groups and a group's
+  /// members page (`function=users`), which MyGroupsService reads (#251);
+  /// and the writes of the run's own group (#252): the form for a new group
+  /// while the run may still make one, and the edit form and the delete
+  /// (`function=delete`, a GET that deletes the group) of a group the run
+  /// made, that the last list still has. Nothing else.
+  String? _myGroupsGetRefusal(Uri uri) {
+    final query = uri.queryParameters;
+    final function = query['function'];
+    if (function == null || function == 'main' || function == 'users') {
+      return null;
+    }
+    const nothingElse =
+        'the live suite changes no own group but the one the run makes '
+        '(#252): it sends "Mijn groepen" no GET but the list, a group\'s '
+        'members page (function=users, #251), the form for a new group, and '
+        'the edit form and the delete (function=delete, a GET that deletes '
+        'the group) of the run\'s own group';
+    if (function == 'addedit' && query.length == 3) {
+      if (myGroupCreates < maxMyGroupCreates) return null;
+      return 'the run made $maxMyGroupCreates own groups already, the most '
+          'it may (#252): no form for a new one';
+    }
+    if (function == 'addedit') {
+      final refusal = _runMyGroupRefusal(_myGroupOf(uri, function), 'edit');
+      return refusal == null ? null : '$nothingElse; $refusal';
+    }
+    if (function == 'delete') {
+      final refusal = _runMyGroupRefusal(_myGroupOf(uri, function), 'delete');
+      return refusal == null ? null : '$nothingElse; $refusal';
+    }
+    return nothingElse;
+  }
+
+  /// Why the save of the form of an own mail group (a POST to
+  /// `/?module=Profile&file=mygroups&function=addedit`, with `&mID={id}` for
+  /// an existing group) with [data] may not go out, or `null` (#252): only
+  /// the fields of the form (`_csrf_token`, `store` `1`, `name`, `desc`), a
+  /// name after the run; a create while the run may still make a group, an
+  /// edit of a group the run made that the last list still has.
+  String? _myGroupSaveRefusal(Uri uri, Object? data) {
+    final form = data is Map ? data : const {};
+    final fields = {for (final key in form.keys) '$key'};
+    if (fields.length != 4 ||
+        !fields.containsAll(const {'_csrf_token', 'store', 'name', 'desc'}) ||
+        '${form['store']}' != '1' ||
+        '${form['_csrf_token']}'.isEmpty) {
+      return 'the save of an own group sends the fields of its form alone: '
+          '_csrf_token, store 1, name and desc (#252)';
+    }
+    final name = '${form['name']}';
+    if (!name.startsWith(_myGroupTagged)) {
+      return 'the name of an own group the run saves starts with '
+          '"$_myGroupTagged" (#252)';
+    }
+    if (uri.queryParameters.length == 3) {
+      if (myGroupCreates >= maxMyGroupCreates) {
+        return 'the run made $maxMyGroupCreates own groups already, the most '
+            'it may (#252)';
+      }
+      myGroupCreates++;
+      return null;
+    }
+    final refusal = _runMyGroupRefusal(_myGroupOf(uri, 'addedit'), 'save');
+    return refusal == null
+        ? null
+        : 'the live suite saves no own group but the one the run makes; '
+              '$refusal';
+  }
+
+  /// Keeps the groups of [body], Smartschool's answer to a GET of "Mijn
+  /// groepen", when it is a list of own groups (#252): as the last list,
+  /// and those named after the run, once a create went out, as made by the
+  /// run. Another page is left alone.
+  void _recordMyGroupsAnswer(int status, String body) {
+    if (status != 200) return;
+    final table = html_parser.parse(body).querySelector('div.mygroup-table');
+    if (table == null) return;
+    final listed = <int, String>{};
+    for (final row in table.querySelectorAll('div.smsc-table__row')) {
+      final name = row.querySelector('div.mygroup-name')?.text.trim();
+      final ids = {
+        for (final link in row.querySelectorAll('a'))
+          for (final url in [
+            link.attributes['href'],
+            link.attributes['onclick'],
+          ])
+            for (final match in RegExp(r'[?&]mID=(\d+)').allMatches(url ?? ''))
+              int.parse(match.group(1)!),
+      };
+      if (name == null || ids.length != 1) continue;
+      listed[ids.single] = name;
+    }
+    _myGroupsListed
+      ..clear()
+      ..addAll(listed);
+    if (myGroupCreates == 0) return;
+    for (final MapEntry(key: id, value: name) in listed.entries) {
+      if (name.startsWith(_myGroupTagged)) _runMyGroups.add(id);
+    }
   }
 
   /// The planner's POSTs that the live suite sends, which only read: the
@@ -2275,6 +2685,13 @@ class LiveWireGuard extends Interceptor {
     }
     if (uri.path.startsWith('/planner/')) {
       _recordPlannerAnswer(options, response.statusCode ?? 0, body);
+      return null;
+    }
+    if (options.method.toUpperCase() == 'GET' &&
+        uri.path == '/' &&
+        query['module'] == 'Profile' &&
+        query['file'] == 'mygroups') {
+      _recordMyGroupsAnswer(response.statusCode ?? 0, body);
       return null;
     }
     if (uri.path != '/' || query['module'] != 'Messages') return null;

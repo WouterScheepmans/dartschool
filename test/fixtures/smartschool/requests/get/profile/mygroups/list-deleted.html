@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<!-- Hand-written (#252) in the shape of Smartschool's answer to the delete of
+     an own mail group (/?module=Profile&file=mygroups&function=delete&mID={id}),
+     seen live on 2026-11-16: 200 with the list of own groups itself (no
+     redirect), without the group, and the feedback "De actie werd correct
+     uitgevoerd." (type 1) in a script. The list of list.html after the
+     delete of group 900503; made-up groups and IDs. -->
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<title>Profiel - Smartschool</title>
+</head>
+<body>
+<div id="smscMainBlockContainer">
+	<div id="smscMainBlockContainerContent">
+		<div class="smscSettings">
+			<a class="smscSettings_backbutton" href="/?module=Profile"></a>
+			<div class="smscSettings_mainTitle">Mijn groepen</div>
+			<div>Stel uw eigen favoriete groepen samen</div>
+		</div>
+		<div>
+			<div class="smsc-table mygroup-table">
+<a href="/?module=Profile&file=mygroups&function=addedit" class="smsc-linkbutton smsc-linkbutton--icon smsc-linkbutton--add add-groups">Nieuwe groep</a>
+	<div class="smsc-table__header">
+		<div class="smsc-table__cell mygroup-icon"></div>
+		<div class="smsc-table__cell mygroup-name">Naam</div>
+		<div class="smsc-table__cell">Omschrijving</div>
+		<div class="smsc-table__cell smsc-table__cell--text-right mygroup-actions"></div>
+	</div>
+<div class="smsc-table__row">
+	<div class="smsc-table__cell mygroup-icon star-icon"></div>
+	<div class="smsc-table__cell mygroup-name">Testgroep 5</div>
+	<div class="smsc-table__cell"></div>
+	<div class="smsc-table__cell smsc-table__cell--text-right mygroup-actions">
+		<a href="/?module=Profile&file=mygroups&function=addedit&mID=900501" class="edit" title='Wijzigen'></a>
+		<a href="/?module=Profile&file=mygroups&function=users&mID=900501" class="add" title='Personen toevoegen'></a>
+		<a onClick="confirmDelete('/?module=Profile&file=mygroups&function=delete&mID=900501');" class="delete" title='Verwijderen'></a>
+	</div>
+</div>
+<div class="smsc-table__row">
+	<div class="smsc-table__cell mygroup-icon star-icon"></div>
+	<div class="smsc-table__cell mygroup-name">testgroep zorg</div>
+	<div class="smsc-table__cell">Testvak 2B</div>
+	<div class="smsc-table__cell smsc-table__cell--text-right mygroup-actions">
+		<a href="/?module=Profile&file=mygroups&function=addedit&mID=900502" class="edit" title='Wijzigen'></a>
+		<a href="/?module=Profile&file=mygroups&function=users&mID=900502" class="add" title='Personen toevoegen'></a>
+		<a onClick="confirmDelete('/?module=Profile&file=mygroups&function=delete&mID=900502');" class="delete" title='Verwijderen'></a>
+	</div>
+</div>
+</div>
+		</div>
+	</div>
+</div>
+<script type="text/javascript">$(document).ready(function() {var msg = "De actie werd correct uitgevoerd.", type = 1;var show = function() {if (window.notificationShowFeedback) { window.notificationShowFeedback(msg, type); return true; }return false;};if (show()) { return; }});</script>
+</body>
+</html>

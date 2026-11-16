@@ -313,6 +313,9 @@ From the support plan reads (#163). `LvsPlanPeriod`: `id`, `name`, `heading`. `L
 ### `LvsAbsences` / `LvsAbsencePeriod` / `LvsAbsence` / `LvsAbsenceTotal`
 From `getAbsences` (#164). `LvsAbsences`: `yearLabel`, `periods` (`label`, `absences`), `absences`, `isEmpty`, `halfDays`, `totalsByCode` (`code`, `codeDescription`, `color`, `count`, `halfDays`). `LvsAbsence`: `date` (UTC, from `formattedDate`), `dateKey`, `formattedDate`, `dayPart` (`DayPart`; `null` for a whole day, `isFullDay`), `partOfDayLabel`, `code`, `codeKey`, `codeDescription`, `color`, `motivation` (plain text) / `motivationHtml`, `halfDays`. Print counts only.
 
+### `MyGroup` / `MyGroupMember`
+From `MyGroupsService` (#251). `MyGroup`: an own mail group of "Mijn groepen", from `list()`: `id` (the `mID` of its links; the `groupId` of the `MessageSearchGroup` that `findRecipient` finds), `name` and `description` (`""` when none), as the list shows them, which does not escape them (a name that holds the text of an HTML entity is read as the character it names). `MyGroupMember`: a member of one, from `members()`: `userId`, `name` (last name first), `ssId` (the member's platform, from Smartschool's member picker), `schoolName` (`String?`, `null` when empty), `type` (the picker's kind of member, `U` for a person, the only kind seen live) and `isUser`. Neither prints a name: `toString()` gives `MyGroup(<id>)` and `MyGroupMember(<type><userId>, ssId: <ssId>)`.
+
 ## Enums
 
 | Enum | Values |

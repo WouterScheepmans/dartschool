@@ -3327,3 +3327,150 @@ class SmartschoolLvsRequestNotAllowedError extends SmartschoolLvsError {
     required this.path,
   });
 }
+
+/// Thrown by `MyGroupsService` when Smartschool answers a read of the own
+/// mail groups ("Mijn groepen", #251) with something the service cannot use:
+/// another HTTP status than `200` (in [statusCode]; a redirect of the member
+/// picker's request too, such as the `302` to `/?module=Homepage` that
+/// Smartschool answers its dispatcher with when the request lacks
+/// `X-Requested-With`), a page that is not the list of own groups, the
+/// members page of a group or the form to create or edit one (#252), a form
+/// without its token, a picker answer that is not `ok` or holds no
+/// selection, a row or item without its ID, or a members page and a picker
+/// selection that do not list the same members.
+///
+/// Never an empty result: a group without members is an empty list, not this
+/// error. Its message names the read and the group by its ID, and quotes no
+/// name of a group or of a member. The session was accepted: signing in
+/// again does not help. A session that Smartschool does not accept is a
+/// [SmartschoolSessionExpiredError] instead. The reads change nothing: from
+/// a create, an update or a delete (#252), this error comes from a read
+/// before the save, which was not sent then. A save that went out and was
+/// not confirmed is a [SmartschoolMyGroupSaveUnconfirmedError], which is not
+/// this error.
+///
+/// From a change of the members of a group (`addMembers`, `setMembers`,
+/// `clearMembers`, `removeMember`, #253), it also comes before the members
+/// form or the removal was sent, so nothing was saved: a members page
+/// without its form, a member picker that did not answer the new selection
+/// by closing on that form (`closeUsc`, its redirect or another status
+/// included), a group with a member that is not a person (a class or a
+/// group: changing such a group was not tried), or a member with the user
+/// ID of a person to add on another platform.
+///
+/// The subtype [SmartschoolMyGroupNotFoundError]: the user has no own group
+/// with that ID.
+class SmartschoolMyGroupsError extends SmartschoolException {
+  /// The HTTP status of Smartschool's answer when it was not `200`; `null`
+  /// when the answer had status `200` but could not be used.
+  final int? statusCode;
+
+  const SmartschoolMyGroupsError(super.message, {this.statusCode});
+
+  @override
+  String toString() => statusCode == null
+      ? '$runtimeType: $message'
+      : '$runtimeType($statusCode): $message';
+}
+
+/// Thrown by `MyGroupsService.members` when the user has no own mail group
+/// with the ID asked for (#251): Smartschool answered the members page of
+/// [groupId] with the list of own groups and its feedback "De actie werd
+/// niet correct uitgevoerd!" (seen live, 2026-11-16, for an ID that names no
+/// group), as it does for a group that was deleted meanwhile. List the
+/// groups again (`MyGroupsService.list`).
+///
+/// Also thrown by `MyGroupsService.update` and `delete` (#252) for a group
+/// that the list of own groups, read first, does not have, before anything
+/// is saved or deleted; by `update` when Smartschool answers the group's
+/// edit form with the list (the group was deleted between the two reads);
+/// and by `delete` when Smartschool answers the delete with that feedback
+/// and a list without the group: it was gone already.
+///
+/// Also thrown by `addMembers`, `setMembers`, `clearMembers` and
+/// `removeMember` (#253) when Smartschool answers the group's members page,
+/// read first, with the list: nothing was changed.
+///
+/// A [SmartschoolMyGroupsError].
+class SmartschoolMyGroupNotFoundError extends SmartschoolMyGroupsError {
+  /// The ID of the group that was asked for.
+  final int groupId;
+
+  const SmartschoolMyGroupNotFoundError(super.message, {required this.groupId});
+}
+
+/// Thrown by the writes of `MyGroupsService` (#252), `create`, `update` and
+/// `delete`, when the save or the delete went out to Smartschool, but its
+/// answer does not confirm it; and by its changes of the members of a group
+/// (#253): `addMembers`, `setMembers` and `clearMembers` when the members
+/// form went out but the members page that Smartschool answers it with does
+/// not list exactly the members sent (or cannot be read), and
+/// `removeMember` when the removal went out but was not answered with
+/// `true`, or the members page after it still lists the member (or cannot
+/// be read). Read the members (`MyGroupsService.members`) before trying
+/// again; sending such a change again changes nothing more.
+///
+/// **The change may or may not have been made.** List the groups
+/// (`MyGroupsService.list`) before trying again. A create that is sent again
+/// when the first one went through makes a second group (but
+/// `MyGroupsService.create` refuses a name that another own group has, so
+/// calling it again with the same name after a create that went through is
+/// refused before anything is saved). An update sent again saves the same
+/// name and description again. A delete of a group that is gone is a
+/// [SmartschoolMyGroupNotFoundError].
+///
+/// Smartschool tells the outcome only by the page that follows a write (seen
+/// live, 2026-11-16): a save answers `302` to the list of own groups, which
+/// shows the feedback "De actie werd niet correct uitgevoerd!" (type `2`)
+/// for a save it refused and no feedback for one that went through; a
+/// delete answers the list itself, with "De actie werd correct uitgevoerd."
+/// (type `1`). So this is thrown when a save is not answered with that
+/// redirect ([statusCode]); when the list after it cannot be read, or shows
+/// a feedback other than type `1`; when that list does not have the new
+/// group with the name and description sent (a create), or the group with
+/// them (an update); when a delete is not answered with the list, with type
+/// `1` and without the group; and when the save or the delete failed after
+/// it went out, before a usable answer came in ([cause] holds the failure,
+/// typically a [SmartschoolConnectionError]).
+///
+/// A session that Smartschool refuses for the save or the delete is not this
+/// error but a [SmartschoolSessionExpiredError] (or another
+/// [SmartschoolAuthenticationError]): Smartschool refused it before handling
+/// it, so nothing was changed.
+///
+/// Its message names the group by its ID only (and a member by its user ID),
+/// and quotes no name or description. Deliberately not a
+/// [SmartschoolMyGroupsError], so a `catch` meant for the failures where
+/// nothing was sent does not catch it.
+class SmartschoolMyGroupSaveUnconfirmedError extends SmartschoolException {
+  /// The ID of the group that was updated or deleted, or whose members were
+  /// changed; `null` for a create, whose group Smartschool does not name in
+  /// its answer.
+  final int? groupId;
+
+  /// The HTTP status of the answer that did not confirm the write (to the
+  /// save, to the read of the list after it, to the delete, to the members
+  /// form or to the removal of a member) when it was not the one expected;
+  /// `null` when the answer had the status expected, or when no answer came
+  /// in (see [cause]).
+  final int? statusCode;
+
+  /// The failure when no usable answer came in: a
+  /// [SmartschoolConnectionError], or the error of the read of the list (or
+  /// the members page) after the write (a [SmartschoolSessionExpiredError]
+  /// among them); `null` when Smartschool answered with something that does
+  /// not confirm the write.
+  final Object? cause;
+
+  const SmartschoolMyGroupSaveUnconfirmedError(
+    super.message, {
+    this.groupId,
+    this.statusCode,
+    this.cause,
+  });
+
+  @override
+  String toString() => statusCode == null
+      ? '$runtimeType: $message'
+      : '$runtimeType($statusCode): $message';
+}

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!-- Hand-written (#252) in the shape of Smartschool's form for a new own
+     mail group (/?module=Profile&file=mygroups&function=addedit), seen live
+     on 2026-11-16: a token (a new one for every load), store, and the
+     inputs name and desc, empty. The form posts to the URL it was loaded
+     from (action=""). Made-up token. -->
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<title>Profiel - Smartschool</title>
+</head>
+<body>
+<div id="smscMainBlockContainer">
+	<div id="smscMainBlockContainerContent">
+		<div class="smscSettings">
+			<a class="smscSettings_backbutton" href="/?module=Profile&file=mygroups"></a>
+			<div class="smscSettings_mainTitle">Mijn groepen</div>
+		</div>
+		<form name="form" action="" method="post">
+<input type="hidden" name="_csrf_token" value="made-up-token-new" />
+<input type="hidden" name="store" value="1" />
+<div class="smsc-form-row">
+	<label>Naam</label> <input type="text" name="name" value="" size="35" class="textfield" />
+</div>
+<div class="smsc-form-row">
+	<label>Omschrijving</label> <input type="text" name="desc" value="" size="35" class="textfield" />
+</div>
+<div class="smsc-form-row">
+	<input type="submit" value="Opslaan" class="smsc-button" />
+</div>
+		</form>
+	</div>
+</div>
+</body>
+</html>
