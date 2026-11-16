@@ -14,8 +14,9 @@ import 'messages_service.dart';
 export '../models/my_group_models.dart';
 
 /// The user's own mail groups (#251): the groups of "Mijn groepen" in the
-/// profile (`/?module=Profile&file=mygroups`), and the members of one; and
-/// creating, renaming and deleting such a group (#252).
+/// profile (`/?module=Profile&file=mygroups`), and the members of one;
+/// creating, renaming and deleting such a group (#252); and adding,
+/// removing and setting its members (#253).
 ///
 /// Every user keeps their own groups of people there; the compose form of
 /// Messages finds such a group by its name, as a group, so that a message to
@@ -34,6 +35,14 @@ export '../models/my_group_models.dart';
 /// var group = await groups.create(name: 'Projectgroep');
 /// group = await groups.update(group, name: 'Projectgroep 5', description: 'reis');
 /// await groups.delete(group);
+///
+/// // Change its members (#253): people as the compose search finds them.
+/// final (users, _) =
+///     await MessagesService(client).searchRecipientsForCompose('Janssens');
+/// await groups.addMembers(group, [users.first]);         // bool
+/// await groups.removeMember(group, (await groups.members(group)).first);
+/// await groups.setMembers(group, users);                 // replaces them
+/// await groups.clearMembers(group);
 /// ```
 ///
 /// What Smartschool answers (seen live, 2026-11-16):
@@ -68,13 +77,28 @@ export '../models/my_group_models.dart';
 ///   asks first, in a JavaScript `confirm()`) answers the list itself,
 ///   without the group, with "De actie werd correct uitgevoerd." (type `1`);
 ///   for an ID the user has no group of, with type `2`.
+/// - **A change of the members** (#253) takes three steps in one session:
+///   the members page (which sets the picker's selection to the current
+///   members, and holds a form `form` with `_csrf_token`, `store` and
+///   `mID`); the picker's command `confirm Selection` with the `usc` and
+///   the **whole** new selection (an `<item>` of `type` `U`, `ssId` and
+///   `id` per member, in `<items>`), which answers `closeUsc` and saves
+///   nothing; and a `POST` of the members form to the members page's
+///   URL, which saves the selection and answers the members page with the
+///   new members. The selection replaces the members. A load of the members
+///   page between the second and the third step resets the selection, and
+///   the third step then saves the old members.
+/// - **The removal of one member** (`POST /Profile/Mygroups/deleteUser`,
+///   form-encoded `userID` and `groupID`, #253) answers `true`, also for
+///   someone who is not a member.
 ///
 /// [members] reads the members page and the picker's selection, in one
 /// session, and checks that they list the same members. A change of the
 /// members (Smartschool's picker steps, which replace the selection) must
 /// not have a read of the group's members page between its steps on the
-/// same session: the calls of [members], [create], [update] and [delete] on
-/// one [SmartschoolClient] take turns, also those through another
+/// same session: the calls of [members], [create], [update], [delete],
+/// [addMembers], [setMembers], [clearMembers] and [removeMember] on one
+/// [SmartschoolClient] take turns, also those through another
 /// [MyGroupsService] of it. (Clients that share one session, through one
 /// cache folder, do not take turns; nor do the calls of [list].)
 ///
@@ -91,8 +115,20 @@ export '../models/my_group_models.dart';
 /// [SmartschoolMyGroupSaveUnconfirmedError]. Name and description are plain
 /// text: Smartschool strips tags when it saves them (`a <b>b</b>` is saved
 /// as `a b`), and the writes return them as the list shows them after the
-/// save. A limit on their length was not tried. The members of a group are
-/// not changed here (#253).
+/// save. A limit on their length was not tried.
+///
+/// ### The members (#253)
+/// [addMembers] adds people to a group, [setMembers] makes people its only
+/// members, [clearMembers] removes them all, [removeMember] removes one.
+/// They take people as `MessagesService.searchRecipientsForCompose` finds
+/// them, of the own school only (adding a person of another school of the
+/// school group was not tried), and change only groups with people as their
+/// members (a class or a group as a member was not tried). The first three
+/// send the picker's steps in the session of the members page, **once**,
+/// and check the members page Smartschool answers: exactly the members
+/// sent. [removeMember] checks the members page before and after the
+/// removal. Each returns `false`, without sending a change, when there is
+/// nothing to change.
 ///
 /// The models never print a name ([MyGroup.toString],
 /// [MyGroupMember.toString]): the members of a group are mostly pupils.
@@ -101,7 +137,10 @@ export '../models/my_group_models.dart';
 /// - [ArgumentError]: [create] or [update] with a blank name (or one that is
 ///   empty without its tags), or a name that another own group has; [update]
 ///   with neither a name nor a description. Nothing was saved (for a name
-///   another group has, the list was read).
+///   another group has, the list was read). [addMembers] and [setMembers]
+///   without people, or with a person who is not known to be of the own
+///   school; [removeMember] of a member that is not a person (#253).
+///   Nothing was sent.
 /// - [SmartschoolMyGroupsError]: Smartschool answered a read with something
 ///   the service cannot use: another status than `200` (its
 ///   [SmartschoolMyGroupsError.statusCode]; a redirect of the picker's
@@ -110,14 +149,18 @@ export '../models/my_group_models.dart';
 ///   selection, a row or item without its ID, or a members page and a
 ///   picker selection that do not list the same members. Never an empty
 ///   result. Its message names a group by its ID only. From a write: from a
-///   read before its save, so nothing was changed.
+///   read before its save, so nothing was changed; for a change of the
+///   members, also a picker answer to the new selection that does not close
+///   on the members form, and a group with a member that is not a person
+///   (#253).
 /// - [SmartschoolMyGroupNotFoundError] (a [SmartschoolMyGroupsError]):
-///   [members], [update] or [delete] for a group the user does not have
-///   (any more).
+///   [members], [update], [delete] or a change of the members for a group
+///   the user does not have (any more).
 /// - [SmartschoolMyGroupSaveUnconfirmedError] (not a
-///   [SmartschoolMyGroupsError]): a save or a delete went out, but its
-///   answer does not confirm it. It may or may not have been made: list the
-///   groups before trying again.
+///   [SmartschoolMyGroupsError]): a save, a delete, the members form or the
+///   removal of a member went out, but its answer does not confirm it. It
+///   may or may not have been made: list the groups (or read the members)
+///   before trying again.
 /// - [SmartschoolUnexpectedPageError] (a [SmartschoolAuthenticationError]):
 ///   the picker answered with an HTML page instead of XML, as for every XML
 ///   command (see `SmartschoolClient.postXml`); a [SmartschoolParsingError]
@@ -171,6 +214,23 @@ class MyGroupsService {
 
   /// The command of the picker's answer to [_selectedItems].
   static const _selectedItemsAnswer = 'handle selected items';
+
+  /// The picker's command that replaces its selection with the one it is
+  /// sent (#253), as its button "Bevestigen" sends it. It saves nothing: the
+  /// members form, posted after it, saves the selection.
+  static const _confirmSelection = 'confirm Selection';
+
+  /// The command of the picker's answer to [_confirmSelection]: close the
+  /// picker, and submit the form of the page that opened it.
+  static const _confirmSelectionAnswer = 'closeUsc';
+
+  /// The form of the members page that the picker's web client submits once
+  /// a selection is confirmed (#253).
+  static const _membersFormName = 'form';
+
+  /// The removal of one member from an own group (#253): a form-encoded POST
+  /// of `userID` and `groupID`, the cross on a member's row.
+  static const _deleteUserPath = '/Profile/Mygroups/deleteUser';
 
   /// The picker's key (`usc`) of the members of own group [groupId].
   static String _usc(int groupId) => 'mygroups_$groupId';
@@ -423,31 +483,189 @@ class MyGroupsService {
   /// group with [group]'s ID (Smartschool answers the list instead), and a
   /// [SmartschoolMyGroupsError] when the page or the picker answer cannot be
   /// used, or when they do not list the same members.
-  Future<List<MyGroupMember>> members(MyGroup group) => _oneAtATime(() async {
-    for (var attempt = 1; ; attempt++) {
+  Future<List<MyGroupMember>> members(MyGroup group) =>
+      _oneAtATime(() async => (await _current(group)).members);
+
+  /// Adds [users] to the members of the own group [group] (#253). Returns
+  /// `true` once the change is saved and confirmed, `false` when each of
+  /// [users] is a member already: then nothing but the reads was sent.
+  ///
+  /// [users] are people as `MessagesService.searchRecipientsForCompose`
+  /// finds them (or the own account, as
+  /// `MessagesService.getCurrentUserAsRecipient` gives it): each must be of
+  /// the own school ([MessageSearchUser.otherSchool] `false`), since adding
+  /// a person of another school of the school group was not tried. The same
+  /// person twice is added once.
+  ///
+  /// Smartschool's member picker replaces the members with the selection it
+  /// is sent, so this sends the current members with the new ones, in the
+  /// three steps of the web client, in one session: it loads the group's
+  /// members page (which sets the picker's selection to the current
+  /// members, and holds the form and its token) and reads the picker's
+  /// selection for their platforms (as [members] does); it sends the picker
+  /// the whole new selection (`userSelect` / `confirm Selection`, which
+  /// saves nothing yet); and it posts the members form (`_csrf_token`,
+  /// `store`, `mID`), which saves the selection and is answered with the
+  /// members page. The change is confirmed when that page lists exactly the
+  /// members sent.
+  ///
+  /// The picker's command and the form are sent **once**: never again after
+  /// logging in again, nor in another session than the members page's. The
+  /// calls on one [SmartschoolClient] take turns (see the class doc), so no
+  /// other load of the members page comes between the steps.
+  ///
+  /// Throws an [ArgumentError], without sending anything, when [users] is
+  /// empty, or holds a person of another school, one whose school is not
+  /// known ([MessageSearchUser.otherSchool] `null`), one without a user ID
+  /// or platform, or people of different platforms. Throws a
+  /// [SmartschoolMyGroupNotFoundError] when the user has no own group with
+  /// [group]'s ID, and a [SmartschoolMyGroupsError] when the members page,
+  /// the picker's selection or the picker's answer to the new selection
+  /// cannot be used, when the group has a member that is not a person (a
+  /// class or a group: not tried), or a member with one of [users]' user
+  /// IDs on another platform: nothing was saved then. Throws a
+  /// [SmartschoolMyGroupSaveUnconfirmedError] when the form went out but its
+  /// answer does not confirm the change: read the members before trying
+  /// again.
+  Future<bool> addMembers(
+    MyGroup group,
+    Iterable<MessageSearchUser> users,
+  ) async {
+    final people = _people(users);
+    if (people.isEmpty) {
+      throw ArgumentError('Give at least one person to add.', 'users');
+    }
+    return _oneAtATime(() => _changeMembers(group, people, replace: false));
+  }
+
+  /// Makes [users] the members of the own group [group], in place of its
+  /// current members (#253). Returns `true` once the change is saved and
+  /// confirmed, `false` when [users] are its members already (nothing but
+  /// the reads was sent).
+  ///
+  /// [users] as for [addMembers]: people of the own school, each once. An
+  /// empty [users] is refused: [clearMembers] empties a group. Sent and
+  /// confirmed as [addMembers] does, with [users] alone as the picker's new
+  /// selection; throws what it throws.
+  Future<bool> setMembers(
+    MyGroup group,
+    Iterable<MessageSearchUser> users,
+  ) async {
+    final people = _people(users);
+    if (people.isEmpty) {
+      throw ArgumentError(
+        'Give at least one person: setMembers does not empty a group, '
+            'clearMembers does.',
+        'users',
+      );
+    }
+    return _oneAtATime(() => _changeMembers(group, people, replace: true));
+  }
+
+  /// Removes every member of the own group [group] (#253). Returns `true`
+  /// once the change is saved and confirmed, `false` when the group has no
+  /// members (nothing but the reads was sent).
+  ///
+  /// Sent and confirmed as [addMembers] does, with an empty selection
+  /// (`<items></items>`, which left a group without members, seen live);
+  /// throws what it throws, but no [ArgumentError].
+  Future<bool> clearMembers(MyGroup group) =>
+      _oneAtATime(() => _changeMembers(group, const [], replace: true));
+
+  /// Removes [member] from the own group [group] (#253). Returns `true` once
+  /// the removal is confirmed, `false` when the group's members page does
+  /// not list [member] (nothing but that read was sent).
+  ///
+  /// Reads the group's members page, sends the removal of the web client's
+  /// cross on a member (`POST /Profile/Mygroups/deleteUser`, form-encoded
+  /// `userID` and `groupID`, with `X-Requested-With`), and reads the members
+  /// page again: Smartschool answers the removal with `true` also for
+  /// someone who is not a member (seen live), so the removal is confirmed
+  /// when that answer is `true` and the members page after it no longer
+  /// lists [member]. A removal sent again removes no one else: like every
+  /// request that carries no state of a page, it goes out again after
+  /// logging in when Smartschool refused the session for it.
+  ///
+  /// The calls on one [SmartschoolClient] take turns (see the class doc).
+  ///
+  /// Throws an [ArgumentError], without sending anything, for a [member]
+  /// that is not a person ([MyGroupMember.isUser]; removing a class or a
+  /// group was not tried). Throws a [SmartschoolMyGroupNotFoundError] when
+  /// the user has no own group with [group]'s ID, and a
+  /// [SmartschoolMyGroupsError] when the members page cannot be used, before
+  /// the removal. Throws a [SmartschoolMyGroupSaveUnconfirmedError] when the
+  /// removal went out but is not confirmed: read the members before trying
+  /// again.
+  Future<bool> removeMember(MyGroup group, MyGroupMember member) async {
+    if (!member.isUser) {
+      throw ArgumentError(
+        'Member ${member.userId} is not a person (type ${member.type}): '
+            'removing a class or a group from an own group was not tried.',
+        'member',
+      );
+    }
+    return _oneAtATime(() async {
       final page = await _client.getResponse(_membersPath(group.id));
-      final listed = _memberIds(page, group.id);
+      if (!_memberIds(page, group.id).contains(member.userId)) return false;
+      final what =
+          'the removal of member ${member.userId} from own group ${group.id}';
+      const tryAgain = 'Read the members before trying again.';
       final Response<String> answer;
       try {
-        answer = await _client.postFormResponse(
-          _pickerPath,
-          {
-            'command': XmlInterface.buildCommand(
-              _pickerSubsystem,
-              _selectedItems,
-              {'usc': _usc(group.id)},
-            ),
-          },
-          retryAfterLogin: false,
-          sameSessionAs: page,
+        answer = await _client.postFormResponse(_deleteUserPath, {
+          'userID': '${member.userId}',
+          'groupID': '${group.id}',
+        });
+      } on SmartschoolAuthenticationError {
+        // Refused before Smartschool handled it: no one was removed.
+        rethrow;
+      } on Exception catch (e, stackTrace) {
+        Error.throwWithStackTrace(
+          SmartschoolMyGroupSaveUnconfirmedError(
+            '$what was sent, but no answer came in ($e). $tryAgain',
+            groupId: group.id,
+            cause: e,
+          ),
+          stackTrace,
         );
-      } on SmartschoolSessionExpiredError {
-        if (attempt >= 2) rethrow;
-        continue;
       }
-      return _join(listed, _selection(answer, group.id), group.id);
-    }
-  });
+      final status = answer.statusCode ?? 0;
+      if (status != 200 || (answer.data ?? '').trim() != 'true') {
+        throw SmartschoolMyGroupSaveUnconfirmedError(
+          'Smartschool answered $what with HTTP $status'
+          '${status == 200 ? ' and another answer than true' : ''}. $tryAgain',
+          groupId: group.id,
+          statusCode: status == 200 ? null : status,
+        );
+      }
+      final List<int> after;
+      try {
+        after = _memberIds(
+          await _client.getResponse(_membersPath(group.id)),
+          group.id,
+        );
+      } on Exception catch (e, stackTrace) {
+        Error.throwWithStackTrace(
+          SmartschoolMyGroupSaveUnconfirmedError(
+            'Smartschool answered $what with true, but the members page '
+            'after it could not be read ($e). $tryAgain',
+            groupId: group.id,
+            statusCode: e is SmartschoolMyGroupsError ? e.statusCode : null,
+            cause: e,
+          ),
+          stackTrace,
+        );
+      }
+      if (after.contains(member.userId)) {
+        throw SmartschoolMyGroupSaveUnconfirmedError(
+          'Smartschool answered $what with true, but the members page after '
+          'it still lists the member. $tryAgain',
+          groupId: group.id,
+        );
+      }
+      return true;
+    });
+  }
 
   /// Finds the own group [group] as a recipient of a message (#251): the
   /// [MessageSearchGroup] that the compose form's recipient search
@@ -756,6 +974,301 @@ class MyGroupsService {
   }
 
   // -------------------------------------------------------------------------
+  // The members (#251, #253)
+  // -------------------------------------------------------------------------
+
+  /// Loads the members page of the own group [group] and reads the member
+  /// picker's selection in its session (#251), and returns that page (whose
+  /// session a change of the members must go out in, #253) and the members.
+  ///
+  /// The picker's request is not retried after logging in again, nor sent
+  /// in another session than the page's: when Smartschool refuses its
+  /// session, or the client logged in again since the page was loaded, this
+  /// loads the page again (logging in first) and reads the picker once
+  /// more; when that fails too, it throws a [SmartschoolSessionExpiredError].
+  Future<({Response<String> page, List<MyGroupMember> members})> _current(
+    MyGroup group,
+  ) async {
+    for (var attempt = 1; ; attempt++) {
+      final page = await _client.getResponse(_membersPath(group.id));
+      final listed = _memberIds(page, group.id);
+      final Response<String> answer;
+      try {
+        answer = await _client.postFormResponse(
+          _pickerPath,
+          {
+            'command': XmlInterface.buildCommand(
+              _pickerSubsystem,
+              _selectedItems,
+              {'usc': _usc(group.id)},
+            ),
+          },
+          retryAfterLogin: false,
+          sameSessionAs: page,
+        );
+      } on SmartschoolSessionExpiredError {
+        if (attempt >= 2) rethrow;
+        continue;
+      }
+      return (
+        page: page,
+        members: _join(listed, _selection(answer, group.id), group.id),
+      );
+    }
+  }
+
+  /// The people of [users] as the member picker takes them, each once, in
+  /// their order (#253).
+  ///
+  /// Throws an [ArgumentError] for a user of another school
+  /// ([MessageSearchUser.otherSchool] `true`: not tried, #238), one whose
+  /// school is not known (`null`), one without a user ID or platform, and
+  /// users of different platforms. Names a user by its ID only.
+  static List<_Person> _people(Iterable<MessageSearchUser> users) {
+    final people = <_Person>[];
+    final seen = <int>{};
+    int? platform;
+    for (final user in users) {
+      final id = user.userId;
+      if (user.otherSchool == true) {
+        throw ArgumentError(
+          'User $id is of another school of the school group (otherSchool): '
+              'adding a person of another school to an own group was not '
+              'tried.',
+          'users',
+        );
+      }
+      if (user.otherSchool == null) {
+        throw ArgumentError(
+          'Whether user $id is of the own school is not known (otherSchool '
+              'is null): take people from '
+              'MessagesService.searchRecipientsForCompose, or the own account '
+              'from MessagesService.getCurrentUserAsRecipient.',
+          'users',
+        );
+      }
+      if (id <= 0 || user.ssId <= 0) {
+        throw ArgumentError(
+          'User $id has no user ID or platform (ssId ${user.ssId}).',
+          'users',
+        );
+      }
+      if (platform != null && user.ssId != platform) {
+        throw ArgumentError(
+          'The users are of different platforms (ssId $platform and '
+              '${user.ssId}), though each is of the own school.',
+          'users',
+        );
+      }
+      platform = user.ssId;
+      if (seen.add(id)) people.add((ssId: user.ssId, userId: id));
+    }
+    return people;
+  }
+
+  /// Changes the members of the own group [group] (#253): to its current
+  /// members and [people], or with [replace] to [people] alone. Returns
+  /// `false`, without sending the change, when the group has those members
+  /// already. See [addMembers].
+  Future<bool> _changeMembers(
+    MyGroup group,
+    List<_Person> people, {
+    required bool replace,
+  }) async {
+    final (:page, :members) = await _current(group);
+    final form = _membersForm(page, group.id);
+    final others = members.where((member) => !member.isUser).length;
+    if (others > 0) {
+      throw SmartschoolMyGroupsError(
+        'Own group ${group.id} has $others members that are not people (a '
+        'class or a group): changing the members of such a group was not '
+        'tried. Nothing was sent.',
+      );
+    }
+    final current = {for (final member in members) member.userId: member.ssId};
+    for (final person in people) {
+      final ssId = current[person.userId];
+      if (ssId != null && ssId != person.ssId) {
+        throw SmartschoolMyGroupsError(
+          'Own group ${group.id} has a member with user ID ${person.userId} '
+          'of another platform (ssId $ssId): its members page could not tell '
+          'the two apart. Nothing was sent.',
+        );
+      }
+    }
+    final selection = <_Person>[
+      if (!replace)
+        for (final member in members)
+          (ssId: member.ssId, userId: member.userId),
+      for (final person in people)
+        if (replace || !current.containsKey(person.userId)) person,
+    ];
+    final next = {for (final person in selection) person.userId};
+    if (next.length == current.length && next.every(current.containsKey)) {
+      return false;
+    }
+    await _sendSelection(group.id, selection, page);
+    await _saveMembers(group.id, form, page, next);
+    return true;
+  }
+
+  /// The members form of [page], the members page of own group [groupId]:
+  /// its token (`_csrf_token`), `store` and `mID`, as the page has them.
+  ///
+  /// Throws a [SmartschoolMyGroupsError] for a form without them.
+  static _MembersForm _membersForm(Response<String> page, int groupId) {
+    final form = html_parser
+        .parse(page.data ?? '')
+        .querySelector('form[name="$_membersFormName"]');
+    String? value(String name) =>
+        form?.querySelector('input[name="$name"]')?.attributes['value'];
+    final token = value('_csrf_token') ?? '';
+    final store = value('store');
+    final mId = value('mID');
+    if (token.isEmpty || store == null || mId == null) {
+      throw SmartschoolMyGroupsError(
+        'The members page of own group $groupId has no members form with its '
+        'token, store and mID. Nothing was sent.',
+      );
+    }
+    return (token: token, store: store, mId: mId);
+  }
+
+  /// Sends the member picker [selection] as the new selection of own group
+  /// [groupId] (`userSelect` / `confirm Selection`), once, in the session of
+  /// [page], the group's members page (#253). It saves nothing.
+  ///
+  /// Throws a [SmartschoolMyGroupsError] for an answer that does not close
+  /// the picker on the members form (`closeUsc`), what the
+  /// picker's read throws for an answer that is not XML, and a
+  /// [SmartschoolSessionExpiredError] when Smartschool refused the session
+  /// or the client logged in again since [page] was loaded.
+  Future<void> _sendSelection(
+    int groupId,
+    List<_Person> selection,
+    Response<String> page,
+  ) async {
+    final what =
+        'the member picker\'s new selection of own group $groupId '
+        '($_confirmSelection)';
+    // The values are numbers: the CDATA of the param cannot hold `]]>`.
+    final items = StringBuffer('<items>');
+    for (final person in selection) {
+      items.write(
+        '<item><type>U</type><ssId>${person.ssId}</ssId>'
+        '<id>${person.userId}</id></item>',
+      );
+    }
+    items.write('</items>');
+    final answer = await _client.postFormResponse(
+      _pickerPath,
+      {
+        'command': XmlInterface.buildCommand(
+          _pickerSubsystem,
+          _confirmSelection,
+          {'usc': _usc(groupId), 'xml': '$items'},
+        ),
+      },
+      retryAfterLogin: false,
+      sameSessionAs: page,
+    );
+    _checkPickerStatus(answer, 'the sending of $what');
+    readXmlAnswer(
+      answer,
+      action: _confirmSelection,
+      parse: (body) {
+        final closes = [
+          for (final action in _pickerActions(body, 'the sending of $what'))
+            if (action.getElement('command')?.innerText.trim() ==
+                _confirmSelectionAnswer)
+              action,
+        ];
+        final form = closes.length == 1
+            ? closes.single
+                  .getElement('data')
+                  ?.getElement('close')
+                  ?.getElement('formname')
+                  ?.innerText
+                  .trim()
+            : null;
+        if (form != _membersFormName) {
+          throw SmartschoolMyGroupsError(
+            'The member picker did not answer $what by closing on the members '
+            'form ("$_confirmSelectionAnswer" with the form name '
+            '"$_membersFormName"). Nothing was saved.',
+          );
+        }
+      },
+    );
+  }
+
+  /// Posts [form], the members form of own group [groupId], once, in the
+  /// session of [page], the members page it is from (#253): Smartschool
+  /// saves the picker's selection then, and answers with the members page.
+  /// Throws a [SmartschoolMyGroupSaveUnconfirmedError] unless that page
+  /// lists exactly the members [expected].
+  ///
+  /// A session that Smartschool refuses for it is thrown as it is (a
+  /// [SmartschoolAuthenticationError]): nothing was saved.
+  Future<void> _saveMembers(
+    int groupId,
+    _MembersForm form,
+    Response<String> page,
+    Set<int> expected,
+  ) async {
+    final what = 'the save of the members of own group $groupId';
+    const tryAgain = 'Read the members before trying again.';
+    final Response<String> answer;
+    try {
+      answer = await _client.postFormResponse(
+        _membersPath(groupId),
+        {'_csrf_token': form.token, 'store': form.store, 'mID': form.mId},
+        retryAfterLogin: false,
+        sameSessionAs: page,
+      );
+    } on SmartschoolAuthenticationError {
+      // Refused before Smartschool handled it, and not sent again: nothing
+      // was saved.
+      rethrow;
+    } on Exception catch (e, stackTrace) {
+      Error.throwWithStackTrace(
+        SmartschoolMyGroupSaveUnconfirmedError(
+          '$what was sent, but no answer came in ($e). $tryAgain',
+          groupId: groupId,
+          cause: e,
+        ),
+        stackTrace,
+      );
+    }
+    final List<int> listed;
+    try {
+      listed = _memberIds(answer, groupId);
+    } on SmartschoolMyGroupsError catch (e, stackTrace) {
+      Error.throwWithStackTrace(
+        SmartschoolMyGroupSaveUnconfirmedError(
+          'After $what: ${e.message} $tryAgain',
+          groupId: groupId,
+          statusCode: e.statusCode,
+          cause: e,
+        ),
+        stackTrace,
+      );
+    }
+    final saved = listed.toSet();
+    if (saved.length != listed.length ||
+        saved.length != expected.length ||
+        !saved.containsAll(expected)) {
+      throw SmartschoolMyGroupSaveUnconfirmedError(
+        'Smartschool answered $what with the members page, but it does not '
+        'list the members sent: it lists ${listed.length}, '
+        '${listed.where(expected.contains).length} of the ${expected.length} '
+        'sent. $tryAgain',
+        groupId: groupId,
+      );
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // The pages
   // -------------------------------------------------------------------------
 
@@ -875,21 +1388,7 @@ class MyGroupsService {
     final what =
         'the member picker\'s selection of own group $groupId '
         '($_selectedItems)';
-    final status = answer.statusCode ?? 0;
-    if (status >= 300 && status < 400) {
-      final location = answer.headers.value('location');
-      throw SmartschoolMyGroupsError(
-        'Smartschool redirected the read of $what to '
-        '${location ?? 'another page'} (HTTP $status).',
-        statusCode: status,
-      );
-    }
-    if (status != 200) {
-      throw SmartschoolMyGroupsError(
-        'Smartschool answered the read of $what with HTTP $status.',
-        statusCode: status,
-      );
-    }
+    _checkPickerStatus(answer, 'the read of $what');
     return readXmlAnswer(
       answer,
       action: _selectedItems,
@@ -897,13 +1396,33 @@ class MyGroupsService {
     );
   }
 
-  /// The members of [body], the XML of the picker's answer to [what].
+  /// Throws a [SmartschoolMyGroupsError] when the picker's [answer] to
+  /// [request] has another status than `200`, a redirect included (such as
+  /// its `302` to the start page for a request without `X-Requested-With`).
+  static void _checkPickerStatus(Response<String> answer, String request) {
+    final status = answer.statusCode ?? 0;
+    if (status >= 300 && status < 400) {
+      final location = answer.headers.value('location');
+      throw SmartschoolMyGroupsError(
+        'Smartschool redirected $request to '
+        '${location ?? 'another page'} (HTTP $status).',
+        statusCode: status,
+      );
+    }
+    if (status != 200) {
+      throw SmartschoolMyGroupsError(
+        'Smartschool answered $request with HTTP $status.',
+        statusCode: status,
+      );
+    }
+  }
+
+  /// The actions of [body], the XML of the picker's answer to [request].
   ///
   /// Throws a [FormatException] for malformed XML (which `readXmlAnswer`
   /// reports), and a [SmartschoolMyGroupsError] for an answer that is not
-  /// `ok`, that holds no selection, or an item without its type, ID or
-  /// platform.
-  static List<MyGroupMember> _parseSelection(String body, String what) {
+  /// `ok`.
+  static List<XmlElement> _pickerActions(String body, String request) {
     final XmlDocument doc;
     try {
       doc = XmlDocument.parse(body);
@@ -914,14 +1433,23 @@ class MyGroupsService {
     final status = response?.getElement('status')?.innerText.trim();
     if (status != 'ok') {
       throw SmartschoolMyGroupsError(
-        'The member picker answered the read of $what with status '
+        'The member picker answered $request with status '
         '${status == null ? '(none)' : '"$status"'}.',
       );
     }
+    return [...?response!.getElement('actions')?.findElements('action')];
+  }
+
+  /// The members of [body], the XML of the picker's answer to the read of
+  /// [what].
+  ///
+  /// Throws a [FormatException] for malformed XML (which `readXmlAnswer`
+  /// reports), and a [SmartschoolMyGroupsError] for an answer that is not
+  /// `ok`, that holds no selection, or an item without its type, ID or
+  /// platform.
+  static List<MyGroupMember> _parseSelection(String body, String what) {
     final selections = [
-      for (final action
-          in response!.getElement('actions')?.findElements('action') ??
-              const <XmlElement>[])
+      for (final action in _pickerActions(body, 'the read of $what'))
         if (action.getElement('command')?.innerText.trim() ==
             _selectedItemsAnswer)
           action.getElement('data')?.getElement('items'),
@@ -994,3 +1522,12 @@ typedef _Form = ({
   String name,
   String description,
 });
+
+/// A person as the member picker takes one in a selection (#253): the
+/// platform and the user ID of an `<item>` of type `U`.
+typedef _Person = ({int ssId, int userId});
+
+/// The members form of a group's members page (#253), which a change of the
+/// members posts: its token (`_csrf_token`), `store` and `mID`, as the page
+/// has them.
+typedef _MembersForm = ({String token, String store, String mId});

@@ -3349,6 +3349,15 @@ class SmartschoolLvsRequestNotAllowedError extends SmartschoolLvsError {
 /// not confirmed is a [SmartschoolMyGroupSaveUnconfirmedError], which is not
 /// this error.
 ///
+/// From a change of the members of a group (`addMembers`, `setMembers`,
+/// `clearMembers`, `removeMember`, #253), it also comes before the members
+/// form or the removal was sent, so nothing was saved: a members page
+/// without its form, a member picker that did not answer the new selection
+/// by closing on that form (`closeUsc`, its redirect or another status
+/// included), a group with a member that is not a person (a class or a
+/// group: changing such a group was not tried), or a member with the user
+/// ID of a person to add on another platform.
+///
 /// The subtype [SmartschoolMyGroupNotFoundError]: the user has no own group
 /// with that ID.
 class SmartschoolMyGroupsError extends SmartschoolException {
@@ -3378,6 +3387,10 @@ class SmartschoolMyGroupsError extends SmartschoolException {
 /// and by `delete` when Smartschool answers the delete with that feedback
 /// and a list without the group: it was gone already.
 ///
+/// Also thrown by `addMembers`, `setMembers`, `clearMembers` and
+/// `removeMember` (#253) when Smartschool answers the group's members page,
+/// read first, with the list: nothing was changed.
+///
 /// A [SmartschoolMyGroupsError].
 class SmartschoolMyGroupNotFoundError extends SmartschoolMyGroupsError {
   /// The ID of the group that was asked for.
@@ -3388,7 +3401,14 @@ class SmartschoolMyGroupNotFoundError extends SmartschoolMyGroupsError {
 
 /// Thrown by the writes of `MyGroupsService` (#252), `create`, `update` and
 /// `delete`, when the save or the delete went out to Smartschool, but its
-/// answer does not confirm it.
+/// answer does not confirm it; and by its changes of the members of a group
+/// (#253): `addMembers`, `setMembers` and `clearMembers` when the members
+/// form went out but the members page that Smartschool answers it with does
+/// not list exactly the members sent (or cannot be read), and
+/// `removeMember` when the removal went out but was not answered with
+/// `true`, or the members page after it still lists the member (or cannot
+/// be read). Read the members (`MyGroupsService.members`) before trying
+/// again; sending such a change again changes nothing more.
 ///
 /// **The change may or may not have been made.** List the groups
 /// (`MyGroupsService.list`) before trying again. A create that is sent again
@@ -3418,25 +3438,28 @@ class SmartschoolMyGroupNotFoundError extends SmartschoolMyGroupsError {
 /// [SmartschoolAuthenticationError]): Smartschool refused it before handling
 /// it, so nothing was changed.
 ///
-/// Its message names the group by its ID only, and quotes no name or
-/// description. Deliberately not a [SmartschoolMyGroupsError], so a `catch`
-/// meant for the failures where nothing was sent does not catch it.
+/// Its message names the group by its ID only (and a member by its user ID),
+/// and quotes no name or description. Deliberately not a
+/// [SmartschoolMyGroupsError], so a `catch` meant for the failures where
+/// nothing was sent does not catch it.
 class SmartschoolMyGroupSaveUnconfirmedError extends SmartschoolException {
-  /// The ID of the group that was updated or deleted; `null` for a create,
-  /// whose group Smartschool does not name in its answer.
+  /// The ID of the group that was updated or deleted, or whose members were
+  /// changed; `null` for a create, whose group Smartschool does not name in
+  /// its answer.
   final int? groupId;
 
   /// The HTTP status of the answer that did not confirm the write (to the
-  /// save, to the read of the list after it, or to the delete) when it was
-  /// not the one expected; `null` when the answer had the status expected,
-  /// or when no answer came in (see [cause]).
+  /// save, to the read of the list after it, to the delete, to the members
+  /// form or to the removal of a member) when it was not the one expected;
+  /// `null` when the answer had the status expected, or when no answer came
+  /// in (see [cause]).
   final int? statusCode;
 
   /// The failure when no usable answer came in: a
-  /// [SmartschoolConnectionError], or the error of the read of the list
-  /// after the save (a [SmartschoolSessionExpiredError] among them); `null`
-  /// when Smartschool answered with something that does not confirm the
-  /// write.
+  /// [SmartschoolConnectionError], or the error of the read of the list (or
+  /// the members page) after the write (a [SmartschoolSessionExpiredError]
+  /// among them); `null` when Smartschool answered with something that does
+  /// not confirm the write.
   final Object? cause;
 
   const SmartschoolMyGroupSaveUnconfirmedError(

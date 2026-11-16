@@ -372,15 +372,62 @@ class _Smartschool implements HttpClientAdapter {
   /// (#252).
   final List<Map<dynamic, dynamic>> myGroupSaves = [];
 
-  /// The answer to "Mijn groepen" (#251, #252): the list, a members page, a
-  /// form, a save or a delete, as Smartschool answers them.
+  /// The members of the own groups other than 900501 (whose members page and
+  /// selection are members.html and get-items-selected.xml), by group, and
+  /// the member picker's selections in the session, by `usc` (#253).
+  final Map<int, List<FakeMyGroupPerson>> myGroupMembers = {};
+  final Map<String, List<FakeMyGroupPerson>> _myGroupSelections = {};
+
+  /// The own account (user 777 of platform 100), the only person a
+  /// selection of the live suite may name.
+  static const _ownPerson = FakeMyGroupPerson(777, 'Janssens Jan', ssId: 100);
+
+  /// The members page of own group [id], which sets the picker's selection
+  /// of the group to its members (#253).
+  ResponseBody _myGroupMembersPage(int id) {
+    if (id == 900501) return _answer(_myGroupMembers);
+    final members = myGroupMembers[id] ?? [];
+    _myGroupSelections['mygroups_$id'] = [...members];
+    return _answer(myGroupMembersPage(id, members, token: 'made-up-token'));
+  }
+
+  /// The member picker's answer (#251, #253): to `confirm Selection`, which
+  /// replaces the selection in the session; to `get Items Selected`, the
+  /// selection.
+  ResponseBody _pickerAnswer(RequestOptions options) {
+    final (:action, :params) = myGroupPickerCommand(
+      (options.data as Map)['command'],
+    );
+    final usc = params['usc'] ?? '';
+    if (action == 'confirm Selection') {
+      _myGroupSelections[usc] = [
+        for (final item in myGroupSelectionSent(params['xml']!))
+          if (item.userId == _ownPerson.userId) _ownPerson,
+      ];
+      return _answer(myGroupConfirmAnswer, contentType: 'text/xml');
+    }
+    if (usc == 'mygroups_900501') {
+      return _answer(_myGroupSelection, contentType: 'text/xml');
+    }
+    return _answer(
+      myGroupSelectionAnswer(_myGroupSelections[usc] ?? const []),
+      contentType: 'text/xml',
+    );
+  }
+
+  /// The answer to "Mijn groepen" (#251, #252, #253): the list, a members
+  /// page, a form, a save, a delete or a post of the members form, as
+  /// Smartschool answers them.
   ResponseBody _myGroupsAnswer(RequestOptions options) {
     final query = options.uri.queryParameters;
     final id = int.tryParse(query['mID'] ?? '');
     final group = myGroups.where((g) => g.id == id).firstOrNull;
     switch ((options.method, query['function'])) {
       case ('GET', 'users'):
-        return _answer(_myGroupMembers);
+        return _myGroupMembersPage(id!);
+      case ('POST', 'users'):
+        myGroupMembers[id!] = [...?_myGroupSelections['mygroups_$id']];
+        return _myGroupMembersPage(id);
       case ('GET', 'addedit'):
         return _answer(myGroupFormPage('made-up-token', group));
       case ('POST', 'addedit'):
@@ -984,13 +1031,20 @@ class _Smartschool implements HttpClientAdapter {
     final query = uri.queryParameters;
     final post = options.method == 'POST';
     switch ((post, uri.path, query['file'], query['function'])) {
-      // "Mijn groepen" (#251, #252): the list, a group's members page, its
-      // form, a save and a delete; and the member picker's selection of the
-      // group.
+      // "Mijn groepen" (#251, #252, #253): the list, a group's members
+      // page, its form, a save, a delete and a post of the members form; the
+      // member picker's selection of the group and a new one; and the
+      // removal of a member.
       case (_, '/', 'mygroups', _):
         return _myGroupsAnswer(options);
       case (true, '/', 'dispatcher', _) when query['module'] == 'Userselect':
-        return _answer(_myGroupSelection, contentType: 'text/xml');
+        return _pickerAnswer(options);
+      case (true, '/Profile/Mygroups/deleteUser', _, _):
+        final fields = options.data as Map;
+        myGroupMembers[int.parse('${fields['groupID']}')]?.removeWhere(
+          (person) => '${person.userId}' == '${fields['userID']}',
+        );
+        return _answer('true', contentType: 'application/json');
       case (false, '/', 'composeMessage', _):
         return _answer(
           query['composeType'] == '0' ? _newMessageForm : replyForm,
@@ -2142,6 +2196,47 @@ void main() {
         '$name hernoemd',
       ]);
       expect(guard.myGroupCreates, 1);
+      expect(guard.violations, isEmpty);
+    });
+
+    test("the member writes of the run's own group, with the own account as "
+        'its only member: the new selection of the own account or of no '
+        'one, the post of its members form, and the removal of the own '
+        'account (#253)', () async {
+      final server = _Smartschool(replyForm: _replyFormFromOwn);
+      final (client, guard) = await _guardedClient(server);
+      final groups = MyGroupsService(client);
+      const own = MessageSearchUser(
+        userId: 777,
+        displayName: 'Me',
+        ssId: 100,
+        otherSchool: false,
+      );
+      final group = await groups.create(name: '$liveMyGroupPrefix $_tag');
+      server.log.clear();
+
+      expect(await groups.addMembers(group, [own]), isTrue);
+      final members = await groups.members(group);
+      expect(await groups.removeMember(group, members.single), isTrue);
+      expect(await groups.setMembers(group, [own]), isTrue);
+      expect(await groups.clearMembers(group), isTrue);
+
+      expect(members.map((m) => m.userId), [777]);
+      expect(server.myGroupMembers[900504], isEmpty);
+      const page =
+          'GET /?module=Profile&file=mygroups&function=users&mID=900504';
+      const picker = 'POST /?module=Userselect&file=dispatcher';
+      const save =
+          'POST /?module=Profile&file=mygroups&function=users&mID=900504';
+      expect(server.log, [
+        ...[page, picker, picker, save],
+        ...[page, picker],
+        ...[page, 'POST /Profile/Mygroups/deleteUser', page],
+        for (var i = 0; i < 2; i++) ...[page, picker, picker, save],
+      ]);
+      expect(guard.myGroupSelections, 3);
+      expect(guard.myGroupMemberSaves, 3);
+      expect(guard.myGroupMemberRemovals, 1);
       expect(guard.violations, isEmpty);
     });
 
@@ -3618,8 +3713,11 @@ void main() {
         expect(_violations(guard), [
           for (var i = 0; i < 8; i++)
             contains("changes no own group's members"),
-          contains('not a request the live suite sends'),
-          contains('not a request the live suite sends'),
+          contains('removes no one from an own group but the own account'),
+          allOf(
+            contains("changes no own group's members"),
+            contains('own group 900501 is not one the run made'),
+          ),
           for (final _ in gets) contains('changes no own group'),
         ]);
       },
@@ -3697,6 +3795,104 @@ void main() {
         ]);
       },
     );
+
+    test("a new selection of the run's own group that names anyone but the own "
+        'account, a post of its members form with other fields, the removal '
+        'of anyone but the own account, and each of them once the last list '
+        'no longer has the group (#253)', () async {
+      final server = _Smartschool(replyForm: _replyFormFromOwn);
+      final (client, guard) = await _guardedClient(server);
+      final groups = MyGroupsService(client);
+      final dio = _dio(server, guard);
+      const picker = '/?module=Userselect&file=dispatcher';
+      const remove = '/Profile/Mygroups/deleteUser';
+      final group = await groups.create(name: '$liveMyGroupPrefix $_tag');
+      final usc = 'mygroups_${group.id}';
+      final save =
+          '/?module=Profile&file=mygroups&function=users&mID=${group.id}';
+      String item(String type, int ssId, int id, [String more = '']) =>
+          '<item><type>$type</type><ssId>$ssId</ssId><id>$id</id>$more'
+          '</item>';
+      Map<String, String> confirm(String xml, [Map<String, String>? more]) => {
+        'command': _pickerCommand('confirm Selection', {
+          'usc': usc,
+          'xml': xml,
+          ...?more,
+        }),
+      };
+      Future<void> post(String path, Map<String, String> fields) => expectLater(
+        dio.post<String>(
+          path,
+          data: fields,
+          options: Options(contentType: Headers.formUrlEncodedContentType),
+        ),
+        throwsA(anything),
+        reason: '$path $fields',
+      );
+      server.log.clear();
+
+      // Another user, the own account with another, of another platform,
+      // or with a field more; another type; not a selection.
+      for (final xml in [
+        '<items>${item('U', 100, 201)}</items>',
+        '<items>${item('U', 100, 777)}${item('U', 100, 201)}</items>',
+        '<items>${item('U', 4069, 777)}</items>',
+        '<items>${item('U', 100, 777, '<userLT>0</userLT>')}</items>',
+        '<items>${item('K', 100, 777)}</items>',
+        '<items><item>${item('U', 100, 777)}</item></items>',
+        '<selection>${item('U', 100, 777)}</selection>',
+        'Janssens',
+      ]) {
+        await post(picker, confirm(xml));
+      }
+      await post(picker, confirm('<items></items>', {'show': '1'}));
+      // The members form with a field more, store 0, an mID.
+      const token = 'made-up-token';
+      await post(
+        save,
+        {'_csrf_token': token, 'store': '1', 'mID': ''}..['name'] = 'x',
+      );
+      await post(save, {'_csrf_token': token, 'store': '0', 'mID': ''});
+      await post(save, {
+        '_csrf_token': token,
+        'store': '1',
+        'mID': '${group.id}',
+      });
+      await post(save, {'_csrf_token': '', 'store': '1', 'mID': ''});
+      // Another user, a field more, a query.
+      await post(remove, {'userID': '201', 'groupID': '${group.id}'});
+      await post(remove, {'userID': '777', 'groupID': '${group.id}', 'x': '1'});
+      await post('$remove?groupID=900501', {
+        'userID': '777',
+        'groupID': '${group.id}',
+      });
+      // The own account from a group the run did not make.
+      await post(remove, {'userID': '777', 'groupID': '900501'});
+      expect(server.log, isEmpty);
+
+      await groups.delete(group);
+      server.log.clear();
+      await post(picker, confirm('<items>${item('U', 100, 777)}</items>'));
+      await post(save, {'_csrf_token': token, 'store': '1', 'mID': ''});
+      await post(remove, {'userID': '777', 'groupID': '${group.id}'});
+
+      expect(server.log, isEmpty);
+      expect(guard.myGroupSelections, 0);
+      expect(guard.myGroupMemberSaves, 0);
+      expect(guard.myGroupMemberRemovals, 0);
+      expect(_violations(guard), [
+        for (var i = 0; i < 8; i++)
+          contains('names no one but the own account'),
+        contains("changes no own group's members but those of the group"),
+        for (var i = 0; i < 4; i++)
+          contains('_csrf_token, store 1 and an empty mID'),
+        for (var i = 0; i < 3; i++)
+          contains('removes no one from an own group but the own account'),
+        contains('own group 900501 is not one the run made'),
+        for (var i = 0; i < 3; i++)
+          contains('not in the last list of own groups'),
+      ]);
+    });
 
     for (final (field, params) in [
       ('To', _params(to: [_own, _other])),

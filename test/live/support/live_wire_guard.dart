@@ -118,8 +118,19 @@
 // - any POST to Smartschool's user picker (`/?module=Userselect&file=
 //   dispatcher`) but the read of the selection of an own group's members
 //   (`userSelect` / `get Items Selected`, with only a `usc` of
-//   `mygroups_{id}`, MyGroupsService.members, #251): never `confirm
-//   Selection`, which replaces a group's members (#253); and any request
+//   `mygroups_{id}`, MyGroupsService.members, #251), and, for the opt-in
+//   live test of #253, the new selection of the members of the run's own
+//   group (`confirm Selection`, with only its `usc` and an `xml` of no
+//   item or one: the own account, type `U`, with its platform). Never a
+//   `confirm Selection` of another group, nor one that names anyone but the
+//   own account; and of the member writes of #253 besides, only those of
+//   the run's own group: the post of its members form
+//   (`function=users&mID={id}`, `_csrf_token`, `store` `1` and an empty
+//   `mID` only), which saves the selection, and the removal of the own
+//   account from it (`/Profile/Mygroups/deleteUser`, `userID` and
+//   `groupID` only), while the last list of own groups has the group (see
+//   below). So the run's group never has another member than the own
+//   account. And any request
 //   to "Mijn groepen" (`/?module=Profile&file=mygroups`) but the list of
 //   own groups, a group's members page (`function=users`), and, for the
 //   opt-in live test of #252, the writes of MyGroupsService on the run's
@@ -377,6 +388,18 @@ class LiveWireGuard extends Interceptor {
 
   /// How many creates of an own mail group it let out (#252).
   int myGroupCreates = 0;
+
+  /// How many new selections of the members of the run's own group (the
+  /// member picker's `confirm Selection`) it let out (#253).
+  int myGroupSelections = 0;
+
+  /// How many posts of the members form of the run's own group, which save
+  /// the selection, it let out (#253).
+  int myGroupMemberSaves = 0;
+
+  /// How many removals of a member from the run's own group it let out
+  /// (#253).
+  int myGroupMemberRemovals = 0;
 
   /// The own mail groups of the last list of own groups that Smartschool
   /// answered through the guard, by ID, with their names (#252): the list,
@@ -765,6 +788,15 @@ class LiveWireGuard extends Interceptor {
         query['function'] == 'addedit') {
       return _myGroupSaveRefusal(uri, options.data);
     }
+    if (path == '/' &&
+        query['module'] == 'Profile' &&
+        query['file'] == 'mygroups' &&
+        query['function'] == 'users') {
+      return _myGroupMembersSaveRefusal(uri, options.data);
+    }
+    if (path == _myGroupRemovePath) {
+      return _myGroupRemoveRefusal(uri, options.data);
+    }
     if (path == '/' && query['module'] == 'Messages') {
       switch ((query['file'], query['function'])) {
         case ('dispatcher', _):
@@ -1019,12 +1051,15 @@ class LiveWireGuard extends Interceptor {
 
   /// Why the POST to the dispatcher of Smartschool's user picker
   /// (`/?module=Userselect&file=dispatcher`) with [data] may not go out, or
-  /// `null`: only the read of the selection of an own group's members
+  /// `null`: the read of the selection of an own group's members
   /// (`userSelect` / `get Items Selected`, with only a `usc` of
   /// `mygroups_{id}`, MyGroupsService.members, #251), which the form holds
-  /// alone. Never `confirm Selection`, which replaces a group's members
-  /// (#253), nor a search or another picker's selection.
-  static String? _userselectRefusal(Uri uri, Object? data) {
+  /// alone; and the new selection of the members of the run's own group
+  /// (`confirm Selection`, with only its `usc` and an `xml` of the own
+  /// account or no one, #253), while the last list has the group. Never
+  /// another `confirm Selection`, which replaces a group's members, nor a
+  /// search or another picker's selection.
+  String? _userselectRefusal(Uri uri, Object? data) {
     final form = data is Map ? data : const {};
     final one = uri.queryParameters.length == 2 && form.length == 1
         ? _singleCommand(form['command'])
@@ -1036,10 +1071,148 @@ class LiveWireGuard extends Interceptor {
         _myGroupUsc.hasMatch(one.params['usc'] ?? '')) {
       return null;
     }
-    return "the live suite changes no own group's members: it sends the "
-        'user picker no command but the read of the selection of an own '
-        'group (userSelect / get Items Selected, with only a usc of '
-        'mygroups_{id}, #251); never confirm Selection (#253)';
+    const nothingElse =
+        "the live suite changes no own group's members but those of the "
+        'group the run makes: it sends the user picker no command but the '
+        'read of the selection of an own group (userSelect / get Items '
+        'Selected, with only a usc of mygroups_{id}, #251), and the new '
+        "selection of the members of the run's own group (confirm "
+        'Selection, with only its usc and xml, #253)';
+    if (one == null ||
+        one.subsystem != 'userSelect' ||
+        one.action != 'confirm Selection' ||
+        one.params.length != 2 ||
+        !one.params.containsKey('xml')) {
+      return nothingElse;
+    }
+    final usc = RegExp(
+      r'^mygroups_([1-9]\d*)$',
+    ).firstMatch(one.params['usc'] ?? '');
+    final refusal = _runMyGroupRefusal(
+      usc == null ? null : int.parse(usc.group(1)!),
+      'change of its members',
+    );
+    if (refusal != null) return '$nothingElse; $refusal';
+    final selection = _ownOnlySelectionRefusal(one.params['xml']!);
+    if (selection != null) return selection;
+    myGroupSelections++;
+    return null;
+  }
+
+  /// Why [xml], the new selection of a `confirm Selection` of the run's own
+  /// group, may not go out, or `null`: an `<items>` of no `<item>` or one,
+  /// the own account (`type` `U`, its `ssId` and `id`, nothing else), so
+  /// that the group never has another member (#253).
+  String? _ownOnlySelectionRefusal(String xml) {
+    const refusal =
+        "the new selection of the members of the run's own group names no "
+        'one but the own account (an <items> of no <item> or one, type U, '
+        'with its ssId and id only, #253)';
+    final own = _own;
+    if (own == null) return '$refusal; the own account is not known yet';
+    final XmlDocument doc;
+    try {
+      doc = XmlDocument.parse(xml);
+    } on XmlException {
+      return refusal;
+    }
+    bool blank(XmlNode node) => node is XmlText && node.value.trim().isEmpty;
+    final roots = doc.childElements.toList();
+    if (roots.length != 1 ||
+        roots.single.name.qualified != 'items' ||
+        roots.single.attributes.isNotEmpty ||
+        roots.single.children.any(
+          (node) =>
+              !blank(node) &&
+              !(node is XmlElement && node.name.qualified == 'item'),
+        )) {
+      return refusal;
+    }
+    final items = roots.single.childElements.toList();
+    if (items.length > 1) return refusal;
+    for (final item in items) {
+      final fields = <String, String>{};
+      for (final node in item.children) {
+        if (blank(node)) continue;
+        if (node is! XmlElement ||
+            node.attributes.isNotEmpty ||
+            node.childElements.isNotEmpty ||
+            fields.containsKey(node.name.qualified)) {
+          return refusal;
+        }
+        fields[node.name.qualified] = node.innerText;
+      }
+      if (item.attributes.isNotEmpty ||
+          fields.length != 3 ||
+          fields['type'] != 'U' ||
+          fields['ssId'] != '${own.ssId}' ||
+          fields['id'] != '${own.userId}') {
+        return refusal;
+      }
+    }
+    return null;
+  }
+
+  /// The removal of one member from an own group (#253).
+  static const _myGroupRemovePath = '/Profile/Mygroups/deleteUser';
+
+  /// Why the post of the members form of an own mail group (a POST to
+  /// `/?module=Profile&file=mygroups&function=users&mID={id}`) with [data]
+  /// may not go out, or `null` (#253): only the fields of the form
+  /// (`_csrf_token`, `store` `1`, an empty `mID`), of the run's own group
+  /// while the last list has it. It saves the picker's selection, which
+  /// only a `confirm Selection` the guard let out or the group's members
+  /// page (its current members) set.
+  String? _myGroupMembersSaveRefusal(Uri uri, Object? data) {
+    final form = data is Map ? data : const {};
+    final fields = {for (final key in form.keys) '$key'};
+    if (fields.length != 3 ||
+        !fields.containsAll(const {'_csrf_token', 'store', 'mID'}) ||
+        '${form['store']}' != '1' ||
+        '${form['mID']}' != '' ||
+        '${form['_csrf_token']}'.isEmpty) {
+      return 'the save of the members of an own group sends the fields of '
+          'its form alone: _csrf_token, store 1 and an empty mID (#253)';
+    }
+    final refusal = _runMyGroupRefusal(
+      _myGroupOf(uri, 'users'),
+      'change of its members',
+    );
+    if (refusal != null) {
+      return "the live suite changes no own group's members but those of the "
+          'group the run makes; $refusal';
+    }
+    myGroupMemberSaves++;
+    return null;
+  }
+
+  /// Why the removal of a member from an own group (a POST to
+  /// `/Profile/Mygroups/deleteUser`) with [data] may not go out, or `null`
+  /// (#253): only `userID` and `groupID`, the own account from the run's own
+  /// group while the last list has it.
+  String? _myGroupRemoveRefusal(Uri uri, Object? data) {
+    final form = data is Map ? data : const {};
+    final fields = {for (final key in form.keys) '$key'};
+    final own = _own;
+    if (uri.hasQuery ||
+        fields.length != 2 ||
+        !fields.containsAll(const {'userID', 'groupID'}) ||
+        own == null ||
+        '${form['userID']}' != '${own.userId}') {
+      return 'the live suite removes no one from an own group but the own '
+          'account, with userID and groupID alone (#253)';
+    }
+    final groupId = '${form['groupID']}';
+    final refusal = _runMyGroupRefusal(
+      RegExp(r'^[1-9]\d*$').hasMatch(groupId) ? int.parse(groupId) : null,
+      'removal of a member',
+    );
+    if (refusal != null) {
+      return "the live suite changes no own group's members but those of the "
+          'group the run makes; $refusal';
+    }
+    myGroupMemberRemovals++;
+    return null;
   }
 
   /// The name of the own mail group of the run (#252): every name it saves
