@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<!-- Hand-written (#252) in the shape of Smartschool's edit form of an own
+     mail group (/?module=Profile&file=mygroups&function=addedit&mID={id}),
+     seen live on 2026-11-16: the form for a new group (addedit.html) with
+     name and desc filled in, escaped in their value (where the list does not
+     escape them). It has no mID field: the ID is in the URL it posts to.
+     Group 900503 of list.html; made-up token. -->
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<title>Profiel - Smartschool</title>
+</head>
+<body>
+<div id="smscMainBlockContainer">
+	<div id="smscMainBlockContainerContent">
+		<div class="smscSettings">
+			<a class="smscSettings_backbutton" href="/?module=Profile&file=mygroups"></a>
+			<div class="smscSettings_mainTitle">Mijn groepen</div>
+		</div>
+		<form name="form" action="" method="post">
+<input type="hidden" name="_csrf_token" value="made-up-token-900503" />
+<input type="hidden" name="store" value="1" />
+<div class="smsc-form-row">
+	<label>Naam</label> <input type="text" name="name" value="Testgroep &amp; &quot;co&quot;" size="35" class="textfield" />
+</div>
+<div class="smsc-form-row">
+	<label>Omschrijving</label> <input type="text" name="desc" value="Testvak &amp; &quot;meer&quot;" size="35" class="textfield" />
+</div>
+<div class="smsc-form-row">
+	<input type="submit" value="Opslaan" class="smsc-button" />
+</div>
+		</form>
+	</div>
+</div>
+</body>
+</html>

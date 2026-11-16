@@ -16,6 +16,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/add_recipient_answer.dart';
+import '../support/my_group_pages.dart';
 import '../support/no_network.dart';
 import '../support/remove_recipient_answer.dart';
 import '../support/temp_cache_dir.dart';
@@ -57,9 +58,9 @@ final _quickDeleteAnswer = _fixture('post/postboxes/quick delete.xml');
 final _moveAnswer = _fixture('post/postboxes/quickmove messages.xml');
 final _searchAnswer = _fixture('post/composemessage/search-user.xml');
 
-/// The own mail groups (#251): the list, the members page of group 900501,
-/// and the member picker's selection of its members.
-final _myGroupList = _fixture('get/profile/mygroups/list.html');
+/// The own mail groups (#251): the members page of group 900501, and the
+/// member picker's selection of its members. The list is that of the
+/// groups of list.html, which the fake changes as Smartschool does (#252).
 final _myGroupMembers = _fixture('get/profile/mygroups/members.html');
 final _myGroupSelection = _fixture('post/userselect/get-items-selected.xml');
 
@@ -359,6 +360,61 @@ class _Smartschool implements HttpClientAdapter {
 
   /// The IDs of each move to the archive that reached it.
   final List<List<int>> archived = [];
+
+  /// The own mail groups (#252): those of list.html, which the list shows
+  /// and the saves and deletes that reach it change, as Smartschool does.
+  final List<FakeMyGroup> myGroups = myGroupsOfListFixture();
+
+  /// The ID of the next own group it makes (#252).
+  int _nextMyGroup = 900504;
+
+  /// The fields of each save of the form of an own group that reached it
+  /// (#252).
+  final List<Map<dynamic, dynamic>> myGroupSaves = [];
+
+  /// The answer to "Mijn groepen" (#251, #252): the list, a members page, a
+  /// form, a save or a delete, as Smartschool answers them.
+  ResponseBody _myGroupsAnswer(RequestOptions options) {
+    final query = options.uri.queryParameters;
+    final id = int.tryParse(query['mID'] ?? '');
+    final group = myGroups.where((g) => g.id == id).firstOrNull;
+    switch ((options.method, query['function'])) {
+      case ('GET', 'users'):
+        return _answer(_myGroupMembers);
+      case ('GET', 'addedit'):
+        return _answer(myGroupFormPage('made-up-token', group));
+      case ('POST', 'addedit'):
+        final fields = options.data as Map;
+        myGroupSaves.add(fields);
+        final name = '${fields['name']}'.replaceAll(myGroupTags, '');
+        final description = '${fields['desc']}'.replaceAll(myGroupTags, '');
+        if (id == null) {
+          myGroups.add(FakeMyGroup(_nextMyGroup++, name, description));
+        } else {
+          group!
+            ..name = name
+            ..description = description;
+        }
+        return ResponseBody.fromString(
+          '',
+          302,
+          headers: {
+            'location': [myGroupListAfterSave],
+          },
+        );
+      case ('GET', 'delete'):
+        myGroups.remove(group);
+        return _answer(
+          myGroupListPage(
+            myGroups,
+            feedback: group == null
+                ? myGroupFeedbackNotDone
+                : myGroupFeedbackDone,
+          ),
+        );
+    }
+    return _answer(myGroupListPage(myGroups));
+  }
 
   /// Each change of the read state or the flag of a message that reached it,
   /// as `<action> <boxType> <msgID>` for a command that names no folder, or
@@ -928,12 +984,11 @@ class _Smartschool implements HttpClientAdapter {
     final query = uri.queryParameters;
     final post = options.method == 'POST';
     switch ((post, uri.path, query['file'], query['function'])) {
-      // "Mijn groepen" (#251): the list, a group's members page, and the
-      // member picker's selection of the group.
-      case (false, '/', 'mygroups', 'users'):
-        return _answer(_myGroupMembers);
-      case (false, '/', 'mygroups', _):
-        return _answer(_myGroupList);
+      // "Mijn groepen" (#251, #252): the list, a group's members page, its
+      // form, a save and a delete; and the member picker's selection of the
+      // group.
+      case (_, '/', 'mygroups', _):
+        return _myGroupsAnswer(options);
       case (true, '/', 'dispatcher', _) when query['module'] == 'Userselect':
         return _answer(_myGroupSelection, contentType: 'text/xml');
       case (false, '/', 'composeMessage', _):
@@ -2049,6 +2104,46 @@ void main() {
         expect(guard.violations, isEmpty);
       },
     );
+
+    test('the writes of the own mail group the run makes, named after the run: '
+        'the form for a new group and its save, the edit form and save of the '
+        'group, and its delete, while the last list has it (#252)', () async {
+      final server = _Smartschool(replyForm: _replyFormFromOwn);
+      final (client, guard) = await _guardedClient(server);
+      final groups = MyGroupsService(client);
+      const name = '$liveMyGroupPrefix $_tag';
+
+      var group = await groups.create(name: name, description: 'test');
+      group = await groups.update(group, name: '$name hernoemd');
+      group = await groups.update(group, description: '');
+      await groups.delete(group);
+
+      expect(group.id, 900504);
+      expect(group.name, '$name hernoemd');
+      expect(group.description, '');
+      expect(server.myGroups.map((g) => g.id), [900503, 900501, 900502]);
+      expect(server.log, [
+        'GET /?module=Profile&file=mygroups',
+        'GET /?module=Profile&file=mygroups&function=addedit',
+        'POST /?module=Profile&file=mygroups&function=addedit',
+        'GET /?module=Profile&file=mygroups&function=main',
+        for (var i = 0; i < 2; i++) ...[
+          'GET /?module=Profile&file=mygroups',
+          'GET /?module=Profile&file=mygroups&function=addedit&mID=900504',
+          'POST /?module=Profile&file=mygroups&function=addedit&mID=900504',
+          'GET /?module=Profile&file=mygroups&function=main',
+        ],
+        'GET /?module=Profile&file=mygroups',
+        'GET /?module=Profile&file=mygroups&function=delete&mID=900504',
+      ]);
+      expect(server.myGroupSaves.map((f) => f['name']), [
+        name,
+        '$name hernoemd',
+        '$name hernoemd',
+      ]);
+      expect(guard.myGroupCreates, 1);
+      expect(guard.violations, isEmpty);
+    });
 
     test('a recipient search on a compose form loaded through it, which '
         'registers no one (#97)', () async {
@@ -3505,10 +3600,11 @@ void main() {
             reason: path,
           );
         }
+        // Of groups the run did not make (#252), and pages of no write.
         final gets = [
           '/?module=Profile&file=mygroups&function=delete&mID=900501',
-          '/?module=Profile&file=mygroups&function=addedit',
           '/?module=Profile&file=mygroups&function=addedit&mID=900501',
+          '/?module=Profile&file=mygroups&function=other',
         ];
         for (final path in gets) {
           await expectLater(
@@ -3525,6 +3621,79 @@ void main() {
           contains('not a request the live suite sends'),
           contains('not a request the live suite sends'),
           for (final _ in gets) contains('changes no own group'),
+        ]);
+      },
+    );
+
+    test(
+      'a save of an own group named without the run, with other fields, of '
+      'a group the run did not make, a second create, and the edit or '
+      "delete of the run's group once the last list no longer has it (#252)",
+      () async {
+        final server = _Smartschool(replyForm: _replyFormFromOwn);
+        final (client, guard) = await _guardedClient(server);
+        final groups = MyGroupsService(client);
+        final dio = _dio(server, guard);
+        const name = '$liveMyGroupPrefix $_tag';
+        const save = '/?module=Profile&file=mygroups&function=addedit';
+        Map<String, String> form(String name) => {
+          '_csrf_token': 'made-up-token',
+          'store': '1',
+          'name': name,
+          'desc': '',
+        };
+        Future<void> post(String path, Map<String, String> fields) =>
+            expectLater(
+              dio.post<String>(
+                path,
+                data: fields,
+                options: Options(
+                  contentType: Headers.formUrlEncodedContentType,
+                ),
+              ),
+              throwsA(anything),
+              reason: '$path $fields',
+            );
+
+        await post(save, form('Projectgroep'));
+        await post(save, {...form(name), 'mID': '900504'});
+        await post(save, {...form(name), 'store': '0'});
+        await post(save, {...form(name), '_csrf_token': ''});
+        await post('$save&mID=900501', form(name));
+        expect(server.log, isEmpty);
+        expect(guard.myGroupCreates, 0);
+
+        final group = await groups.create(name: name);
+        expect(guard.myGroupCreates, 1);
+        server.log.clear();
+        await expectLater(groups.create(name: '$name 2'), throwsA(anything));
+        await post(save, form('$name 2'));
+        expect(server.log, ['GET /?module=Profile&file=mygroups']);
+
+        await groups.delete(group);
+        server.log.clear();
+        await expectLater(
+          dio.get<String>(
+            '/?module=Profile&file=mygroups&function=delete&mID=${group.id}',
+          ),
+          throwsA(anything),
+        );
+        await expectLater(
+          dio.get<String>('$save&mID=${group.id}'),
+          throwsA(anything),
+        );
+        await post('$save&mID=${group.id}', form(name));
+
+        expect(server.log, isEmpty);
+        expect(server.myGroupSaves, hasLength(1));
+        expect(_violations(guard), [
+          contains('starts with "$name"'),
+          for (var i = 0; i < 3; i++) contains('fields of its form alone'),
+          contains('own group 900501 is not one the run made'),
+          contains('no form for a new one'),
+          contains('the most it may'),
+          for (var i = 0; i < 3; i++)
+            contains('not in the last list of own groups'),
         ]);
       },
     );
