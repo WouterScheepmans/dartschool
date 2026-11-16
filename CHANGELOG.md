@@ -1,4 +1,4 @@
-## Unreleased
+## 0.4.6 - 2026-11-16
 
 ### Can break a build
 - New top-level names (#251): `MyGroup`, `MyGroupMember`, `MyGroupsService`, `SmartschoolMyGroupNotFoundError`, `SmartschoolMyGroupsError`.
