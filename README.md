@@ -23,6 +23,7 @@ Repository: [yvanvds/dartschool](https://github.com/yvanvds/dartschool)
 - Year plans (`TeachingAssignmentService`): the teaching assignments of the Lesfiches module, each split into lesson clusters that hold lesfiches and titles in order, with learning goals; make a teaching assignment, add a cluster, fill it with lesfiches and titles, set its goals, and delete the teaching assignment again, with creates and adds that are never retried.
 - Learning goals (`GoalService`): the curricula of Smartschool's goal selector (the eindtermen, the curricula of the philosophies of life, the school's mini-databases), each as a tree of headings and goals with the goals that can be picked, and the naming of the goals a lesfiche or a planned lesson stores; read only.
 - Pupil tracking system support (`LvsService`, LVS): as the logged-in teacher, find a pupil by name and read the overview of the pupil's file (who, which class, today's attendance, and which sections of the file hold something), the pupil's notes per category (behaviour, care, talks with parents: the school's own categories) or all of them, with their fields, the pupil's results in every course (evaluations with their scores, feedback, reports), the pupil's support plan (support needs, goals, approach, profile sketch), and whether the account may use the LVS; read only, by an allowlist of requests, with models and errors that never print a pupil's data (see [`doc/lvs-privacy.md`](doc/lvs-privacy.md)).
+- Own mail groups (`MyGroupsService`): the user's own groups of "Mijn groepen" in the profile and the members of one, each with the platform Smartschool's member picker gives it, and an own group as a recipient of a message; read only.
 
 ---
 
@@ -146,6 +147,7 @@ The README gives an overview of each service, with a short example. The rest of 
 | `LessonContentService`, `TeachingAssignmentService` | [`doc/lesson-content.md`](doc/lesson-content.md) |
 | `GoalService` | [`doc/goals.md`](doc/goals.md) |
 | `LvsService` | [`doc/lvs.md`](doc/lvs.md) |
+| `MyGroupsService` | [`doc/my-groups.md`](doc/my-groups.md) |
 | Models and enums | [`doc/models.md`](doc/models.md) |
 | Exceptions | [`doc/exceptions.md`](doc/exceptions.md) |
 
@@ -659,6 +661,23 @@ The rest of its reference is in [`doc/lvs.md`](doc/lvs.md#lvsservice): [Methods]
 
 ---
 
+## `MyGroupsService`
+
+Reads the user's **own mail groups** (#251): the groups of "Mijn groepen" in the profile (`/?module=Profile&file=mygroups`), which the compose form of Messages finds by name, as a group, so that a message to one goes to all its members. `list` gives the groups (`MyGroup`: `id`, `name`, `description`), `members` the members of one (`MyGroupMember`: `userId`, `name`, and the `ssId` and `schoolName` that Smartschool's member picker gives), and `findRecipient` the group as a `MessageSearchGroup` for `sendMessage`. It only reads. The members of a group are mostly pupils: the models never print a name.
+
+```dart
+final groups = MyGroupsService(client);
+final all = await groups.list();                          // List<MyGroup>
+final members = await groups.members(all.first);          // List<MyGroupMember>
+print('${members.length} members');
+
+final recipient = await groups.findRecipient(all.first);  // MessageSearchGroup?
+```
+
+The rest of its reference is in [`doc/my-groups.md`](doc/my-groups.md#mygroupsservice): [Methods](doc/my-groups.md#methods), [Errors](doc/my-groups.md#errors).
+
+---
+
 ## Models
 
 The models the services return, with their fields, are in [`doc/models.md`](doc/models.md#models).
@@ -734,6 +753,8 @@ What it checks, on messages it sends to the own account: `sendMessage` is confir
 `test/live/lesson_content_goals_live_test.dart` sets the learning goals of a lesfiche in the own library (#223): it makes a lesson lesfiche named after the run with a goal of the goal selector in the create, changes its goals (`changeGoals`) to goals of the selector and checks them with `getDetail` and `resolve`, sets a made-up goal ID once to see that the module stores it without complaint, clears the goals, and moves the lesfiche to the module's trash, after which `getItems` no longer lists it. The guard lets out goals in a create or a `change-goals` of a lesfiche the run made only in the shape the library sends them (`{id, goalId, leerplanId, type}`, `goalId` the same as the UUID `id`).
 
 `test/live/goal_live_test.dart` only reads the goal selector (#222): the list of curricula (the same for the Lesfiches module and the planner), the first curriculum with goals, a made-up curriculum ID (`404`), and the naming of one of its goals with `resolve`, the selector's one POST that reads (`"isView": true`), the only POST to the goal selector the guard lets out.
+
+`test/live/my_groups_live_test.dart` only reads the own mail groups (#251): the list of own groups, the members of each (checked against the member picker's selection, each with a platform), a made-up group ID (`SmartschoolMyGroupNotFoundError`), and each group found by `findRecipient` with its ID. It prints IDs and counts only, never a name: the members of a group are mostly pupils. The guard lets out the picker's read of the selection of an own group (`userSelect` / `get Items Selected`, with only a `usc` of `mygroups_{id}`) as the only POST to the picker, and of "Mijn groepen" no GET but the list and a members page: never the picker's `confirm Selection`, which replaces a group's members, nor the GET that deletes a group.
 
 `test/live/lesson_content_write_live_test.dart` writes in the Lesfiches module, in the own library only, which is private to the teacher (#129). It makes a lesson lesfiche with a course, a weblink and an attachment in one create (`createLesson`) and checks it with `getDetail` and `getItems`, downloads the attachment back unchanged (also as a stream), changes its name, icon, info, courses and visibility, adds, changes and removes a weblink and an attachment, checks that an empty name, an address the web client refuses and a course the school does not have send no write, makes an assignment lesfiche of a school assignment type (`createAssignment`), and moves both to the module's trash (`trash`), after which `getItems` no longer lists them. Every lesfiche it makes is named `[dartschool test] <run tag> ...`, every file `dartschool-test-<run tag>-....txt`; at the end, also when a test failed, it moves what is left to the trash. It never deletes a lesfiche for good, never shares or plans one, and sends no label or goal. The guard lets a lesfiche write out only for a lesfiche the run made (as Smartschool answered its create) and did not move to the trash: a create named after the run, without labels or other lists (goals only as the library sends them, #223), at most two per run; a rename to a name after the run, the other edits (a change of its goals as well), its weblinks and attachments (the DELETE of one of them is the only DELETE the live suite sends), an upload directory handed out through the guard once; and the move to the trash of what the run made. It refuses everything else in the module (labels, deeplinks, a share, a restore, `delete/bulk`).
 

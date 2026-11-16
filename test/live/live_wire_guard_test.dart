@@ -57,6 +57,17 @@ final _quickDeleteAnswer = _fixture('post/postboxes/quick delete.xml');
 final _moveAnswer = _fixture('post/postboxes/quickmove messages.xml');
 final _searchAnswer = _fixture('post/composemessage/search-user.xml');
 
+/// The own mail groups (#251): the list, the members page of group 900501,
+/// and the member picker's selection of its members.
+final _myGroupList = _fixture('get/profile/mygroups/list.html');
+final _myGroupMembers = _fixture('get/profile/mygroups/members.html');
+final _myGroupSelection = _fixture('post/userselect/get-items-selected.xml');
+
+/// The `command` form field of the user picker's dispatcher (#251) for one
+/// command with [params].
+String _pickerCommand(String action, Map<String, String> params) =>
+    XmlInterface.buildCommand('userSelect', action, params);
+
 /// The reply form of received message 900030, from [_other].
 final _replyFormFromOther = _fixture('get/composemessage/reply.html');
 
@@ -917,6 +928,14 @@ class _Smartschool implements HttpClientAdapter {
     final query = uri.queryParameters;
     final post = options.method == 'POST';
     switch ((post, uri.path, query['file'], query['function'])) {
+      // "Mijn groepen" (#251): the list, a group's members page, and the
+      // member picker's selection of the group.
+      case (false, '/', 'mygroups', 'users'):
+        return _answer(_myGroupMembers);
+      case (false, '/', 'mygroups', _):
+        return _answer(_myGroupList);
+      case (true, '/', 'dispatcher', _) when query['module'] == 'Userselect':
+        return _answer(_myGroupSelection, contentType: 'text/xml');
       case (false, '/', 'composeMessage', _):
         return _answer(
           query['composeType'] == '0' ? _newMessageForm : replyForm,
@@ -2003,6 +2022,29 @@ void main() {
         expect(named, isEmpty);
         expect(server.log, [
           'POST /goal/selector/api/v1/leerplannen/lesson-content/2026-11-01',
+        ]);
+        expect(guard.violations, isEmpty);
+      },
+    );
+
+    test(
+      "the reads of the own mail groups: the list, a group's members "
+      "page, and the member picker's selection of the group (#251)",
+      () async {
+        final server = _Smartschool(replyForm: _replyFormFromOwn);
+        final (client, guard) = await _guardedClient(server);
+        final groups = MyGroupsService(client);
+
+        final all = await groups.list();
+        final members = await groups.members(
+          all.firstWhere((g) => g.id == 900501),
+        );
+
+        expect(members, hasLength(3));
+        expect(server.log, [
+          'GET /?module=Profile&file=mygroups',
+          'GET /?module=Profile&file=mygroups&function=users&mID=900501',
+          'POST /?module=Userselect&file=dispatcher',
         ]);
         expect(guard.violations, isEmpty);
       },
@@ -3366,6 +3408,127 @@ void main() {
   });
 
   group('refuses before it reaches Smartschool', () {
+    test(
+      "a change of an own group's members through the member picker, any "
+      'other picker command or selection, and any GET of "Mijn groepen" '
+      'but the list and a members page, its delete above all (#251)',
+      () async {
+        final server = _Smartschool(replyForm: _replyFormFromOwn);
+        final (_, guard) = await _guardedClient(server);
+        final dio = _dio(server, guard);
+        const picker = '/?module=Userselect&file=dispatcher';
+        final read = _pickerCommand('get Items Selected', {
+          'usc': 'mygroups_900501',
+        });
+        final posts = [
+          // The picker steps of a change of the members (#253).
+          (
+            picker,
+            {
+              'command': _pickerCommand('confirm Selection', {
+                'usc': 'mygroups_900501',
+                'xml':
+                    '<items><item><type>U</type><ssId>4069</ssId>'
+                    '<id>900001</id></item></items>',
+              }),
+            },
+          ),
+          (
+            picker,
+            {
+              'command': _pickerCommand('search', {
+                'usc': 'mygroups_900501',
+                'val': 'Janssens',
+              }),
+            },
+          ),
+          // The read, for another picker, with a param more, a field more,
+          // a second command, or another subsystem.
+          (
+            picker,
+            {
+              'command': _pickerCommand('get Items Selected', {
+                'usc': 'mygroups_900501_x',
+              }),
+            },
+          ),
+          (
+            picker,
+            {
+              'command': _pickerCommand('get Items Selected', {
+                'usc': 'mygroups_900501',
+                'xml': '<items/>',
+              }),
+            },
+          ),
+          (picker, {'command': read, 'store': '1'}),
+          (
+            picker,
+            {
+              'command': read.replaceFirst(
+                '</request>',
+                '<command><subsystem>userSelect</subsystem>'
+                    '<action>confirm Selection</action><params/></command>'
+                    '</request>',
+              ),
+            },
+          ),
+          (
+            picker,
+            {
+              'command': XmlInterface.buildCommand(
+                'other',
+                'get Items Selected',
+                {'usc': 'mygroups_900501'},
+              ),
+            },
+          ),
+          ('$picker&usc=mygroups_900501', {'command': read}),
+          // The removal of one member, and the save of the members form.
+          (
+            '/Profile/Mygroups/deleteUser',
+            {'userID': '900001', 'groupID': '900501'},
+          ),
+          (
+            '/?module=Profile&file=mygroups&function=users&mID=900501',
+            {'_csrf_token': 'token', 'store': '1', 'mID': ''},
+          ),
+        ];
+        for (final (path, form) in posts) {
+          await expectLater(
+            dio.post<String>(
+              path,
+              data: form,
+              options: Options(contentType: Headers.formUrlEncodedContentType),
+            ),
+            throwsA(anything),
+            reason: path,
+          );
+        }
+        final gets = [
+          '/?module=Profile&file=mygroups&function=delete&mID=900501',
+          '/?module=Profile&file=mygroups&function=addedit',
+          '/?module=Profile&file=mygroups&function=addedit&mID=900501',
+        ];
+        for (final path in gets) {
+          await expectLater(
+            dio.get<String>(path),
+            throwsA(anything),
+            reason: path,
+          );
+        }
+
+        expect(server.log, isEmpty);
+        expect(_violations(guard), [
+          for (var i = 0; i < 8; i++)
+            contains("changes no own group's members"),
+          contains('not a request the live suite sends'),
+          contains('not a request the live suite sends'),
+          for (final _ in gets) contains('changes no own group'),
+        ]);
+      },
+    );
+
     for (final (field, params) in [
       ('To', _params(to: [_own, _other])),
       ('CC', _params(cc: [_other])),

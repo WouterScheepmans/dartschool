@@ -3327,3 +3327,49 @@ class SmartschoolLvsRequestNotAllowedError extends SmartschoolLvsError {
     required this.path,
   });
 }
+
+/// Thrown by `MyGroupsService` when Smartschool answers a read of the own
+/// mail groups ("Mijn groepen", #251) with something the service cannot use:
+/// another HTTP status than `200` (in [statusCode]; a redirect of the member
+/// picker's request too, such as the `302` to `/?module=Homepage` that
+/// Smartschool answers its dispatcher with when the request lacks
+/// `X-Requested-With`), a page that is not the list of own groups or the
+/// members page of a group, a picker answer that is not `ok` or holds no
+/// selection, a row or item without its ID, or a members page and a picker
+/// selection that do not list the same members.
+///
+/// Never an empty result: a group without members is an empty list, not this
+/// error. Its message names the read and the group by its ID, and quotes no
+/// name of a group or of a member. The session was accepted: signing in
+/// again does not help. A session that Smartschool does not accept is a
+/// [SmartschoolSessionExpiredError] instead. The reads change nothing.
+///
+/// The subtype [SmartschoolMyGroupNotFoundError]: the user has no own group
+/// with that ID.
+class SmartschoolMyGroupsError extends SmartschoolException {
+  /// The HTTP status of Smartschool's answer when it was not `200`; `null`
+  /// when the answer had status `200` but could not be used.
+  final int? statusCode;
+
+  const SmartschoolMyGroupsError(super.message, {this.statusCode});
+
+  @override
+  String toString() => statusCode == null
+      ? '$runtimeType: $message'
+      : '$runtimeType($statusCode): $message';
+}
+
+/// Thrown by `MyGroupsService.members` when the user has no own mail group
+/// with the ID asked for (#251): Smartschool answered the members page of
+/// [groupId] with the list of own groups and its feedback "De actie werd
+/// niet correct uitgevoerd!" (seen live, 2026-11-16, for an ID that names no
+/// group), as it does for a group that was deleted meanwhile. List the
+/// groups again (`MyGroupsService.list`).
+///
+/// A [SmartschoolMyGroupsError].
+class SmartschoolMyGroupNotFoundError extends SmartschoolMyGroupsError {
+  /// The ID of the group that was asked for.
+  final int groupId;
+
+  const SmartschoolMyGroupNotFoundError(super.message, {required this.groupId});
+}

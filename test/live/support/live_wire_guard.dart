@@ -115,6 +115,14 @@
 //   of goals (`goal/selector/api/v1/leerplannen/{location}/{date}` with
 //   `"isView": true`, GoalService.resolve, #222), which only reads: never a
 //   curriculum marked as a favourite or the selector's settings saved;
+// - any POST to Smartschool's user picker (`/?module=Userselect&file=
+//   dispatcher`) but the read of the selection of an own group's members
+//   (`userSelect` / `get Items Selected`, with only a `usc` of
+//   `mygroups_{id}`, MyGroupsService.members, #251): never `confirm
+//   Selection`, which replaces a group's members (#253); and any GET of
+//   "Mijn groepen" (`/?module=Profile&file=mygroups`) but the list of own
+//   groups and a group's members page (`function=users`): its delete
+//   (`function=delete`) is a GET that deletes the group (#252);
 // - any Intradesk POST but the writes of IntradeskService that the live
 //   suite tries (#128), and those only in the Intradesk folder it may write
 //   in: "tests" in "2. SMA" at the root, as Smartschool's listings name it
@@ -670,6 +678,12 @@ class LiveWireGuard extends Interceptor {
         uri.queryParameters['file'] == 'searchUsers') {
       return _otherSchoolsSwitchRefusal(uri);
     }
+    if (method == 'GET' &&
+        uri.path == '/' &&
+        uri.queryParameters['module'] == 'Profile' &&
+        uri.queryParameters['file'] == 'mygroups') {
+      return _myGroupsGetRefusal(uri);
+    }
     if (method == 'GET') return null;
     if (method == 'DELETE' && uri.path.startsWith(_lessonContentApi)) {
       return _lessonContentDeleteRefusal(uri.path);
@@ -708,6 +722,11 @@ class LiveWireGuard extends Interceptor {
     }
 
     final query = uri.queryParameters;
+    if (path == '/' &&
+        query['module'] == 'Userselect' &&
+        query['file'] == 'dispatcher') {
+      return _userselectRefusal(uri, options.data);
+    }
     if (path == '/' && query['module'] == 'Messages') {
       switch ((query['file'], query['function'])) {
         case ('dispatcher', _):
@@ -895,12 +914,25 @@ class LiveWireGuard extends Interceptor {
   /// `<action>` and `<params>`, nothing else), whose params are its own,
   /// each once.
   static bool _isLvsReadCommand(Object? command) {
-    if (command is! String) return false;
+    final one = _singleCommand(command);
+    if (one == null) return false;
+    final allowed = _lvsCommands[(one.subsystem, one.action)];
+    return allowed != null && one.params.keys.every(allowed.contains);
+  }
+
+  /// [command], the form field `command` of an XML dispatcher, when it is a
+  /// `<request>` of one `<command>` (its `<subsystem>`, `<action>` and
+  /// `<params>`, nothing else) whose params each have a name, once, and
+  /// text only: its subsystem, action and params by name. `null` for
+  /// anything else.
+  static ({String subsystem, String action, Map<String, String> params})?
+  _singleCommand(Object? command) {
+    if (command is! String) return null;
     final XmlDocument xml;
     try {
       xml = XmlDocument.parse(command);
     } on XmlException {
-      return false;
+      return null;
     }
     bool onlyElements(XmlElement element) => element.children.every(
       (node) =>
@@ -908,7 +940,7 @@ class LiveWireGuard extends Interceptor {
     );
     final roots = xml.childElements.toList();
     if (roots.length != 1 || roots.single.name.qualified != 'request') {
-      return false;
+      return null;
     }
     final request = roots.single;
     final commands = request.childElements.toList();
@@ -916,30 +948,75 @@ class LiveWireGuard extends Interceptor {
         commands.length != 1 ||
         commands.single.name.qualified != 'command' ||
         !onlyElements(commands.single)) {
-      return false;
+      return null;
     }
     final parts = commands.single.childElements.toList();
     if (parts.map((part) => part.name.qualified).join(',') !=
             'subsystem,action,params' ||
         !onlyElements(parts[2])) {
-      return false;
+      return null;
     }
-    final allowed =
-        _lvsCommands[(parts[0].innerText.trim(), parts[1].innerText.trim())];
-    if (allowed == null) return false;
-    final names = <String>{};
+    final params = <String, String>{};
     for (final param in parts[2].childElements) {
       final name = param.getAttribute('name');
       if (param.name.qualified != 'param' ||
           name == null ||
           param.attributes.length != 1 ||
           param.childElements.isNotEmpty ||
-          !allowed.contains(name) ||
-          !names.add(name)) {
-        return false;
+          params.containsKey(name)) {
+        return null;
       }
+      params[name] = param.innerText;
     }
-    return true;
+    return (
+      subsystem: parts[0].innerText.trim(),
+      action: parts[1].innerText.trim(),
+      params: params,
+    );
+  }
+
+  /// The `usc` of the member picker for the members of an own group
+  /// (`mygroups_{id}`, #251).
+  static final _myGroupUsc = RegExp(r'^mygroups_\d+$');
+
+  /// Why the POST to the dispatcher of Smartschool's user picker
+  /// (`/?module=Userselect&file=dispatcher`) with [data] may not go out, or
+  /// `null`: only the read of the selection of an own group's members
+  /// (`userSelect` / `get Items Selected`, with only a `usc` of
+  /// `mygroups_{id}`, MyGroupsService.members, #251), which the form holds
+  /// alone. Never `confirm Selection`, which replaces a group's members
+  /// (#253), nor a search or another picker's selection.
+  static String? _userselectRefusal(Uri uri, Object? data) {
+    final form = data is Map ? data : const {};
+    final one = uri.queryParameters.length == 2 && form.length == 1
+        ? _singleCommand(form['command'])
+        : null;
+    if (one != null &&
+        one.subsystem == 'userSelect' &&
+        one.action == 'get Items Selected' &&
+        one.params.length == 1 &&
+        _myGroupUsc.hasMatch(one.params['usc'] ?? '')) {
+      return null;
+    }
+    return "the live suite changes no own group's members: it sends the "
+        'user picker no command but the read of the selection of an own '
+        'group (userSelect / get Items Selected, with only a usc of '
+        'mygroups_{id}, #251); never confirm Selection (#253)';
+  }
+
+  /// Why the GET of "Mijn groepen" (`/?module=Profile&file=mygroups`) to
+  /// [uri] may not go out, or `null`: only the list of own groups and a
+  /// group's members page (`function=users`), which MyGroupsService reads
+  /// (#251). Not its delete (`function=delete`), which is a GET that
+  /// deletes the group (#252), nor any other.
+  static String? _myGroupsGetRefusal(Uri uri) {
+    final function = uri.queryParameters['function'];
+    if (function == null || function == 'main' || function == 'users') {
+      return null;
+    }
+    return 'the live suite changes no own group: it sends "Mijn groepen" no '
+        "GET but the list and a group's members page (function=users, "
+        '#251); a delete (function=delete) is a GET that deletes the group';
   }
 
   /// The planner's POSTs that the live suite sends, which only read: the

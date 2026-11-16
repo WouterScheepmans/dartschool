@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written (#251): the user picker's answer to get Items Selected for
+     an own group without members (usc mygroups_900502), as seen live on
+     2026-11-16: <items />. -->
+<server><response><status>ok</status><actions><action>
+<subsystem>userselect</subsystem><command>handle selected items</command>
+<data><items /></data>
+</action></actions></response></server>
