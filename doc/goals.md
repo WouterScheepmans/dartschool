@@ -4,7 +4,7 @@ The reference of `GoalService` (#222). The README keeps its overview, with a sho
 
 ## `GoalService`
 
-Smartschool's goal selector is its own app (`/goal/`), which the Lesfiches module and the planner open to pick the learning goals of a lesfiche or a lesson. Its JSON API is under `/goal/selector/api/v1/`; every route names a `GoalLocation` (where the selector is opened: `lessonContent`, the default, or `plannerLessonContent`) and a day (`yyyy-MM-dd`, today by default; curricula can change with the school year). Both locations list the same curricula (seen live, 2026-11-01).
+Smartschool's goal selector is its own app (`/goal/`), which the Lesfiches module and the planner open to pick the learning goals of a lesfiche or a lesson. Its JSON API is under `/goal/selector/api/v1/`; every route names a `GoalLocation` (where the selector is opened: `lessonContent`, the default, `plannerLessonContent`, or `lessonContentNavigator`) and a day (`yyyy-MM-dd`, today by default; curricula can change with the school year). `lessonContent` and `plannerLessonContent` list the same curricula (seen live, 2026-11-01). `lessonContentNavigator` (`lesson-content-navigator`) is the selector's "GO! Navigator" tab of the Lesfiches module: the curricula of the GO!, in answers of the same shapes (seen live, 2026-11-23). See [GO! Navigator](#go-navigator).
 
 ### Methods
 
@@ -27,7 +27,17 @@ The eindtermen have headings with goals under them, the goals in HTML with their
 
 A `LearningGoalRef` (`id`, `leerplanId`, `type`) is how a lesfiche or a planned lesson stores a goal: `fromJson` and `toJson` read and write that, `toWire` adds the `goalId` (the same as `id`) that the web clients send. `LessonContentService.changeGoals` and the creates of lesfiches send them, and `LessonContentDetail.goals` reads them (#223, see [`doc/lesson-content.md`](lesson-content.md#lessoncontentservice)); `PlannerService.changeGoals` sets those of an own planned lesson, and `PlannedElementDetail.goals` reads them (#226, see [`doc/planner.md`](planner.md)). For a goal of the selector, `type` is the curriculum's `leerplanType`; goals of other sources have their source there (`llinkid`, `zill`, ...).
 
-The service does not mark curricula as favourites, keep the selector's settings, or read goals of LLinkid, Zill, OVSG, POV, GO! Navigator or Op Stap.
+The service does not mark curricula as favourites, keep the selector's settings, or read goals of LLinkid, Zill, OVSG, POV or Op Stap.
+
+### GO! Navigator
+
+The Lesfiches module's goal dialog has a second tab, "GO! Navigator", with the curricula of the GO!. It opens the same selector app at the location `lesson-content-navigator` (`GoalLocation.lessonContentNavigator`), with the same three routes (seen live on 2026-11-23):
+
+- `getCurricula(location: GoalLocation.lessonContentNavigator)`: one group, `Navigator`, with some 345 curricula; each one's grade (`Eerste graad`, `Tweede graad`, `Derde graad`) is its `CurriculumListItem.group` (`metadata.group`), since titles such as `Wiskunde` occur in more than one grade.
+- `getCurriculum(id, location: GoalLocation.lessonContentNavigator)`: a tree as for the eindtermen, with `leerplanType` `go-navigator`. Its headings are `title`s; its goals have the kinds `normaal-doel`, `mia`, `basisgeletterdheid`, `uitbreiding`, `subgoal-global` and `subgoal-platform` (`config.typesThatCanBeSelected`; `CurriculumNodeType.other`, by `typeName`), nested: a `normaal-doel` can have `subgoal-global`s and `mia`s under it. Their numbers (`prefix`) look like `WD3_01.01.01`.
+- `resolve(goals, location: GoalLocation.lessonContentNavigator)`: names stored GO! goals. The other locations answer `[]` for them (seen live), so a lesfiche with goals of both kinds is named with two calls.
+
+A lesfiche stores a GO! goal as any other: a `LearningGoalRef` with the goal's `id`, the curriculum's `leerplanId` and `type` `go-navigator`, sent with `LessonContentService.changeGoals` (the web client sends the same `change-goals` request, seen live). Whether the planner has a navigator location of its own was not checked.
 
 ### Errors
 

@@ -3,15 +3,33 @@ import 'package:html/parser.dart' as html_parser;
 import '../exceptions.dart';
 
 /// Where Smartschool's goal selector is opened (#222): the first part of
-/// every route of `/goal/selector/api/v1/leerplannen/`. Both list the same
-/// curricula (seen live, 2026-11-01); the selector names the place it picks
-/// goals for.
+/// every route of `/goal/selector/api/v1/leerplannen/`. [lessonContent] and
+/// [plannerLessonContent] list the same curricula (seen live, 2026-11-01);
+/// the selector names the place it picks goals for.
+/// [lessonContentNavigator] is the selector's "GO! Navigator" tab of the
+/// Lesfiches module, with the curricula of the GO! instead (seen live,
+/// 2026-11-23).
 enum GoalLocation {
   /// The Lesfiches module (`lesson-content`): the goals of a lesfiche.
   lessonContent('lesson-content'),
 
   /// The planner (`planner-lesson-content`): the goals of a planned lesson.
-  plannerLessonContent('planner-lesson-content');
+  plannerLessonContent('planner-lesson-content'),
+
+  /// The "GO! Navigator" tab of the Lesfiches module
+  /// (`lesson-content-navigator`): the curricula of the GO! (GO! onderwijs
+  /// van de Vlaamse Gemeenschap), for the goals of a lesfiche. The routes
+  /// and their answers have the shapes of [lessonContent] (seen live,
+  /// 2026-11-23): one group (`Navigator`) whose curricula have their grade
+  /// in `metadata.group` (`Eerste graad`, ...), a curriculum's
+  /// `leerplanType` is `go-navigator`, and its goals have the kinds
+  /// `normaal-doel`, `mia`, `subgoal-global` and the like
+  /// ([CurriculumNodeType.other], by [CurriculumNode.typeName]). A lesfiche
+  /// stores such a goal as any other ([LearningGoalRef] with `type`
+  /// `go-navigator`, through `LessonContentService.changeGoals`); only this
+  /// location names it in `GoalService.resolve` (the others answer `[]`
+  /// for it, seen live).
+  lessonContentNavigator('lesson-content-navigator');
 
   /// The name in the route.
   final String wireName;
@@ -150,16 +168,24 @@ class CurriculumListItem {
   /// Whether the user marked it as a favourite (`metadata.isFavourite`).
   final bool isFavourite;
 
+  /// The part of its group the selector shows the curriculum under
+  /// (`metadata.group`), such as `Derde graad` for a curriculum of
+  /// [GoalLocation.lessonContentNavigator], whose list is one group; `null`
+  /// when it has none (an empty one too).
+  final String? group;
+
   const CurriculumListItem({
     required this.id,
     required this.title,
     this.icon,
     this.isVisible = true,
     this.isFavourite = false,
+    this.group,
   });
 
   /// Parses an item (`{"id", "title", "metadata": {"icon", "isVisible",
-  /// "isFavourite"}}`). Throws a [SmartschoolGoalError] without an `id`.
+  /// "isFavourite", "group"}}`). Throws a [SmartschoolGoalError] without an
+  /// `id`.
   factory CurriculumListItem.fromJson(Map<String, dynamic> json) {
     final metadata = json['metadata'];
     final meta = metadata is Map<String, dynamic>
@@ -171,6 +197,9 @@ class CurriculumListItem {
       icon: meta['icon'] is String ? meta['icon'] as String : null,
       isVisible: meta['isVisible'] != false,
       isFavourite: meta['isFavourite'] == true,
+      group: meta['group'] is String && (meta['group'] as String).isNotEmpty
+          ? meta['group'] as String
+          : null,
     );
   }
 }

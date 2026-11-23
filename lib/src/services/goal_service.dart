@@ -41,10 +41,16 @@ export '../models/goal_models.dart';
 ///   the curricula of the goals asked for, pruned to them and the nodes above
 ///   them ([resolve]). It only reads.
 ///
+/// The curricula of the GO! (the selector's "GO! Navigator" tab of the
+/// Lesfiches module) are read through the same three routes, at
+/// [GoalLocation.lessonContentNavigator] (`lesson-content-navigator`, seen
+/// live on 2026-11-23); their goals are stored on a lesfiche with `type`
+/// `go-navigator`, and only that location names them in [resolve].
+///
 /// The service only reads. It does not mark curricula as favourites, keep
 /// the selector's settings, or read goals of LLinkid (Katholiek Onderwijs
-/// Vlaanderen, picked on its own site), Zill, OVSG, POV, GO! Navigator or
-/// Op Stap. Writing goals belongs to the Lesfiches module and the planner.
+/// Vlaanderen, picked on its own site), Zill, OVSG, POV or Op Stap. Writing
+/// goals belongs to the Lesfiches module and the planner.
 ///
 /// ### Errors
 /// - [SmartschoolGoalError]: the selector answered with something the

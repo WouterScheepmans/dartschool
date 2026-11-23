@@ -105,6 +105,42 @@ const _resolved =
       {"id":"$_miniGoal2Id","title":"Je kan bestanden delen","type":"goal","metadata":{"prefix":""},"children":[]}]}]}]}]
 ''';
 
+const _navId = 'e0000000-0000-4000-8000-000000000004';
+const _navTitleId = 'f0000000-0000-4000-8000-000000000030';
+const _navGoalId = 'f0000000-0000-4000-8000-000000000031';
+const _navSubgoalId = 'f0000000-0000-4000-8000-000000000032';
+const _navMiaId = 'f0000000-0000-4000-8000-000000000033';
+
+/// The list of the GO! Navigator tab: one group, its curricula with their
+/// grade in `metadata.group` (two of the same title), as seen live on
+/// 2026-11-23; the IDs and the third title are made up.
+const _navList =
+    '''
+[{"name":"Navigator","leerplanListItems":[
+  {"id":"$_navId","title":"Wiskunde, voorbeeld","metadata":{"group":"Derde graad","number":"","icon":"navigator_go","isVisible":true,"isFavourite":false}},
+  {"id":"e0000000-0000-4000-8000-000000000005","title":"Wiskunde, voorbeeld","metadata":{"group":"Tweede graad","number":"","icon":"navigator_go","isVisible":true,"isFavourite":false}},
+  {"id":"e0000000-0000-4000-8000-000000000006","title":"Zonder graad","metadata":{"group":"","icon":"navigator_go"}}]}]
+''';
+
+/// A GO! curriculum in the shape seen live on 2026-11-23: a heading, a
+/// goal (`normaal-doel`) with a subgoal (`subgoal-global`) and a part of
+/// the content (`mia`) under it. Titles and IDs are made up.
+const _nav =
+    '''
+{"id":"$_navId","type":"go-navigator","title":"Wiskunde, voorbeeld","metadata":{"prefix":"","group":"Derde graad","isVisible":true,"isDeprecated":false},
+ "config":{"typesThatCanBeFiltered":["normaal-doel","mia","basisgeletterdheid","uitbreiding","subgoal-global","subgoal-platform"],"filterObjects":[],"typesThatCanBeSelected":["normaal-doel","mia","basisgeletterdheid","uitbreiding","subgoal-global","subgoal-platform"],"leerplanType":"go-navigator","tokens":[]},
+ "children":[{"id":"$_navTitleId","type":"title","title":"06.04 Wiskunde voorbeeld","metadata":{"prefix":""},"children":[
+   {"id":"$_navGoalId","type":"normaal-doel","title":"De leerlingen bepalen een voorbeeld.","metadata":{"prefix":"WD3_06.04.01","type":"normaal-doel"},"children":[
+     {"id":"$_navSubgoalId","title":"De leerlingen berekenen een voorbeeld.","type":"subgoal-global","metadata":{"prefix":"WD3_06.04.01.01"},"children":[]},
+     {"id":"$_navMiaId","title":"een inhoud","type":"mia","metadata":{"prefix":""},"children":[]}]}]}]}
+''';
+
+const _navGoalRef = LearningGoalRef(
+  id: _navGoalId,
+  leerplanId: _navId,
+  type: 'go-navigator',
+);
+
 const _goal1Ref = LearningGoalRef(
   id: _goal1Id,
   leerplanId: _eindtermenId,
@@ -647,6 +683,114 @@ void main() {
         goals.resolve([_goal1Ref], date: day),
         throwsA(_goalError(contains('instead of a list'))),
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // GO! Navigator
+  // ---------------------------------------------------------------------------
+
+  group('GoalLocation.lessonContentNavigator (GO! Navigator)', () {
+    test('getCurricula GETs leerplannen/lesson-content-navigator/list/{day}; '
+        'each curriculum has its grade as group', () async {
+      final (server, goals) = await serve([_json(_navList)]);
+
+      final groups = await goals.getCurricula(
+        location: GoalLocation.lessonContentNavigator,
+        date: day,
+      );
+
+      expect(server.log, [
+        'GET $_api/lesson-content-navigator/list/2026-11-01',
+      ]);
+      expect(groups.map((g) => g.name), ['Navigator']);
+      expect(groups.single.curricula.map((c) => c.group), [
+        'Derde graad',
+        'Tweede graad',
+        null,
+      ]);
+      expect(groups.single.curricula.first.icon, 'navigator_go');
+    });
+
+    test('a curriculum of another location has no group', () async {
+      final (_, goals) = await serve([_json(_list)]);
+
+      final groups = await goals.getCurricula(date: day);
+
+      expect(
+        groups.expand((g) => g.curricula).map((c) => c.group),
+        everyElement(isNull),
+      );
+    });
+
+    test('getCurriculum reads a GO! curriculum: its goals, subgoals and '
+        'contents can be picked, nested', () async {
+      final (server, goals) = await serve([_json(_nav)]);
+
+      final tree = await goals.getCurriculum(
+        _navId,
+        location: GoalLocation.lessonContentNavigator,
+        date: day,
+      );
+
+      expect(server.log, [
+        'GET $_api/lesson-content-navigator/$_navId/2026-11-01',
+      ]);
+      expect(tree.leerplanType, 'go-navigator');
+      expect(tree.goals.map((g) => g.node.id), [
+        _navGoalId,
+        _navSubgoalId,
+        _navMiaId,
+      ]);
+      expect(tree.goals.map((g) => g.node.typeName), [
+        'normaal-doel',
+        'subgoal-global',
+        'mia',
+      ]);
+      expect(
+        tree.goals.map((g) => g.node.type),
+        everyElement(CurriculumNodeType.other),
+      );
+      final sub = tree.goals[1];
+      expect(sub.node.prefix, 'WD3_06.04.01.01');
+      expect(sub.path.map((n) => n.id), [_navTitleId, _navGoalId]);
+      expect(
+        sub.ref,
+        const LearningGoalRef(
+          id: _navSubgoalId,
+          leerplanId: _navId,
+          type: 'go-navigator',
+        ),
+      );
+      expect(tree.goals.first.ref, _navGoalRef);
+    });
+
+    test('resolve POSTs to leerplannen/lesson-content-navigator/{day} and '
+        'names a stored GO! goal', () async {
+      final (server, goals) = await serve([_json('[$_nav]')]);
+
+      final named = await goals.resolve(
+        [_navGoalRef],
+        location: GoalLocation.lessonContentNavigator,
+        date: day,
+      );
+
+      expect(server.log, ['POST $_api/lesson-content-navigator/2026-11-01']);
+      expect(server.bodies.single, {
+        'selection': [
+          {
+            'id': _navGoalId,
+            'goalId': _navGoalId,
+            'leerplanId': _navId,
+            'type': 'go-navigator',
+          },
+        ],
+        'isView': true,
+      });
+      expect(GoalService.findGoal(named, _navGoalRef)!.titles, [
+        '06.04 Wiskunde voorbeeld',
+        'De leerlingen bepalen een voorbeeld.',
+      ]);
     });
   });
 
