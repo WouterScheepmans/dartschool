@@ -3474,3 +3474,52 @@ class SmartschoolMyGroupSaveUnconfirmedError extends SmartschoolException {
       ? '$runtimeType: $message'
       : '$runtimeType($statusCode): $message';
 }
+
+/// Thrown by `CourseService` when Smartschool answers a read of a course's
+/// modules (the course menu, the documents, the upload zones, the news)
+/// with something it cannot use: another status than the one expected, or
+/// a page without the list it reads.
+class SmartschoolCourseError extends SmartschoolException {
+  /// The HTTP status of Smartschool's answer when it was not the one
+  /// expected; `null` when the answer had that status but could not be used.
+  final int? statusCode;
+
+  const SmartschoolCourseError(super.message, {this.statusCode});
+
+  @override
+  String toString() => statusCode == null
+      ? '$runtimeType: $message'
+      : '$runtimeType($statusCode): $message';
+}
+
+/// Thrown by the writes of `CourseService` (a new folder of documents,
+/// uploaded documents, a new upload zone, a news item) when the write went
+/// out to Smartschool, but its answer, or the list read after it, does not
+/// confirm it. The write may or may not have been made: read the list
+/// before trying again, as a second write makes a second item.
+///
+/// Not a [SmartschoolCourseError]: a caller that retries on that error must
+/// not retry this one.
+class SmartschoolCourseWriteUnconfirmedError extends SmartschoolException {
+  /// The HTTP status of the answer that did not confirm the write, when it
+  /// was not the one expected; `null` otherwise, or when no answer came in
+  /// (see [cause]).
+  final int? statusCode;
+
+  /// The failure when no usable answer came in: a
+  /// [SmartschoolConnectionError], or the error of the read of the list
+  /// after the write; `null` when Smartschool answered with something that
+  /// does not confirm it.
+  final Object? cause;
+
+  const SmartschoolCourseWriteUnconfirmedError(
+    super.message, {
+    this.statusCode,
+    this.cause,
+  });
+
+  @override
+  String toString() => statusCode == null
+      ? '$runtimeType: $message'
+      : '$runtimeType($statusCode): $message';
+}

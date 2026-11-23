@@ -43,6 +43,7 @@ export 'src/models/teaching_assignment_models.dart';
 export 'src/models/goal_models.dart';
 export 'src/models/lvs_models.dart';
 export 'src/models/my_group_models.dart';
+export 'src/models/course_models.dart';
 
 // Services
 export 'src/services/messages_service.dart';
@@ -58,3 +59,4 @@ export 'src/services/teaching_assignment_service.dart';
 export 'src/services/goal_service.dart';
 export 'src/services/lvs_service.dart';
 export 'src/services/my_groups_service.dart';
+export 'src/services/course_service.dart';

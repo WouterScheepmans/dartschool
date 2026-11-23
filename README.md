@@ -24,6 +24,7 @@ Repository: [yvanvds/dartschool](https://github.com/yvanvds/dartschool)
 - Learning goals (`GoalService`): the curricula of Smartschool's goal selector (the eindtermen, the curricula of the philosophies of life, the school's mini-databases), each as a tree of headings and goals with the goals that can be picked, and the naming of the goals a lesfiche or a planned lesson stores; read only.
 - Pupil tracking system support (`LvsService`, LVS): as the logged-in teacher, find a pupil by name and read the overview of the pupil's file (who, which class, today's attendance, and which sections of the file hold something), the pupil's notes per category (behaviour, care, talks with parents: the school's own categories) or all of them, with their fields, the pupil's results in every course (evaluations with their scores, feedback, reports), the pupil's support plan (support needs, goals, approach, profile sketch), and whether the account may use the LVS; read only, by an allowlist of requests, with models and errors that never print a pupil's data (see [`doc/lvs-privacy.md`](doc/lvs-privacy.md)).
 - Own mail groups (`MyGroupsService`): the user's own groups of "Mijn groepen" in the profile and the members of one, each with the platform Smartschool's member picker gives it, and an own group as a recipient of a message; create a group, change its name and description, and delete it again, with saves that are never retried and are checked against the list Smartschool shows after them; add people of the own school to a group, remove one, set its members or empty it, through the steps of Smartschool's member picker in one session, each change checked against the members page Smartschool answers.
+- Course management (`CourseService`): the courses of the course menu, and per course its documents (list a folder, make a folder, upload files with when pupils see them, download a file), its upload zones (list them, make one with its period, file limit and rights) and its news (read the items with their messages, post one), with saves that are never retried and are checked against the list Smartschool shows after them.
 
 ---
 
@@ -148,6 +149,7 @@ The README gives an overview of each service, with a short example. The rest of 
 | `GoalService` | [`doc/goals.md`](doc/goals.md) |
 | `LvsService` | [`doc/lvs.md`](doc/lvs.md) |
 | `MyGroupsService` | [`doc/my-groups.md`](doc/my-groups.md) |
+| `CourseService` | [`doc/courses.md`](doc/courses.md) |
 | Models and enums | [`doc/models.md`](doc/models.md) |
 | Exceptions | [`doc/exceptions.md`](doc/exceptions.md) |
 
@@ -686,6 +688,24 @@ await groups.delete(group);
 ```
 
 The rest of its reference is in [`doc/my-groups.md`](doc/my-groups.md#mygroupsservice): [Methods](doc/my-groups.md#methods), [Writes](doc/my-groups.md#writes), [Members](doc/my-groups.md#members), [Errors](doc/my-groups.md#errors).
+
+---
+
+## `CourseService`
+
+The **management of a course** by its teacher: `getCourses` reads the courses of the course menu in the top bar (`ManagedCourse`: `id` and `platformId`, the `courseID` and `ssID` of its modules, `name`, `description`, `teacher`, `kind`). Per course, `getDocuments`, `createFolder`, `uploadDocuments` and `downloadDocument` work in its documents (Documenten), `getUploadZones` and `createUploadZone` in its upload zones (Uploadzone), and `getNews` and `postNews` in its news (Vaknieuws). Each write sends its save once and checks the list Smartschool shows after it (a write it cannot confirm is a `SmartschoolCourseWriteUnconfirmedError`: read the list before trying again).
+
+```dart
+final courses = CourseService(client);
+final course = (await courses.getCourses()).firstWhere((c) => c.name == 'testvak');
+
+final folder = await courses.createFolder(course, name: 'Hoofdstuk 1');
+await courses.uploadDocuments(course, ['/pad/naar/les1.pdf'], folderId: folder.id);
+await courses.createUploadZone(course, name: 'Taak 1', maxFiles: 1);
+await courses.postNews(course, title: 'Welkom', html: '<p>Hallo!</p>');
+```
+
+The rest of its reference is in [`doc/courses.md`](doc/courses.md#courseservice): [Methods](doc/courses.md#methods), [Writes](doc/courses.md#writes).
 
 ---
 

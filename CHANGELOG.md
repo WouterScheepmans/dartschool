@@ -1,13 +1,17 @@
 ## Unreleased
 
 ### Can break a build
+- New top-level names: `CourseDocument`, `CourseDocumentKind`, `CourseNewsItem`, `CourseService`, `CourseUploadZone`, `ManagedCourse`, `ManagedCourseKind`, `SmartschoolCourseError`, `SmartschoolCourseWriteUnconfirmedError`.
 - `GoalLocation` has a third value, `lessonContentNavigator`: an exhaustive `switch` on it needs a case for it.
 
 ### Added
 - Goals: the curricula of the GO! (the "GO! Navigator" tab of the Lesfiches module's goal dialog) through the new `GoalLocation.lessonContentNavigator` (`lesson-content-navigator`, seen live on 2026-11-23). `GoalService.getCurricula`, `getCurriculum` and `resolve` take it as any location: the routes and the shapes of their answers are those of `lessonContent`; a curriculum's `leerplanType` is `go-navigator`, its goals are of the kinds `normaal-doel`, `mia`, `subgoal-global` and the like (`CurriculumNodeType.other`, picked by `Curriculum.selectableTypes` as before), and a lesfiche stores one as a `LearningGoalRef` with `type` `go-navigator`, through `LessonContentService.changeGoals` as before. Only this location names such a goal in `resolve`; the others answer `[]` for it. `doc/goals.md` has a section on it.
 - Goals: `CurriculumListItem.group`, the part of its group the selector shows a curriculum under (`metadata.group`, `null` when empty): the grade of a GO! curriculum (`Eerste graad`, ...), since the navigator's list is one group.
 
+- Course management: the new `CourseService` reads the courses of the course menu (`POST /Topnav/getCourseConfig`, `ManagedCourse`), and per course its documents (`getDocuments`, `createFolder`, `uploadDocuments`, `downloadDocument`; `/Documents/...`), its upload zones (`getUploadZones`, `createUploadZone`; the module's tree and its dispatcher command `saveuploadmap`) and its news (`getNews`, `postNews`; `?module=News`), as seen live on 2026-11-23. Each write reads the list first, sends its save once, never again after logging in, and is confirmed by the new item in the list after it; otherwise it is the new `SmartschoolCourseWriteUnconfirmedError`. A read Smartschool answers with something it cannot use is the new `SmartschoolCourseError`. `doc/courses.md` has its reference.
+
 ### Tests
+- `test/course_service_test.dart` checks `CourseService` against a fake Smartschool.
 - `test/goal_service_test.dart` checks the navigator location's three routes and a curriculum list item's `group`.
 
 ## 0.4.6 - 2026-11-16
